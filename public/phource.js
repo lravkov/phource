@@ -356,9 +356,11 @@ function calculateOrbitalLayout(rootNode) {
             const nodeSize = (node.forceSize || 50) / 2;
             const parentRadius = depth > 0 ?
                 Math.sqrt(node.targetPos.x ** 2 + node.targetPos.z ** 2) : 0;
-            const ringStep = Math.max(FILE_SPHERE_RADIUS * 10, MIN_FILE_GAP) + 20;
+            // Cluster files tightly around parent directory (not on wide concentric rings)
+            const baseOffset = nodeSize + 20;  // Just past the directory sphere
+            const ringStep = Math.max(FILE_SPHERE_RADIUS * 10, MIN_FILE_GAP * 0.3) + 10;
 
-            // Sort by size (largest first for better outer ring packing)
+            // Sort by size (largest first for better packing)
             const sorted = [...files].sort((a, b) => {
                 const as = Math.max(a.buildingWidth, a.buildingDepth);
                 const bs = Math.max(b.buildingWidth, b.buildingDepth);
@@ -367,8 +369,8 @@ function calculateOrbitalLayout(rootNode) {
 
             let fileIdx = 0, ring = 0;
             while (fileIdx < sorted.length) {
-                const fileR = parentRadius + nodeSize + (ring + 1) * ringStep;
-                const arcLength = sectorAngle * fileR;
+                const clusterR = parentRadius + baseOffset + ring * ringStep;
+                const arcLength = sectorAngle * clusterR;
                 const capacity = Math.max(1, Math.floor(arcLength / (ringStep * 1.5)));
                 const count = Math.min(capacity, sorted.length - fileIdx);
                 for (let j = 0; j < count; j++) {
@@ -376,11 +378,11 @@ function calculateOrbitalLayout(rootNode) {
                     file.parentDir = node;
                     const angle = startAngle + ((j + 0.5) / count) * sectorAngle;
                     file.targetPos = new THREE.Vector3(
-                        Math.cos(angle) * fileR,
+                        Math.cos(angle) * clusterR,
                         node.foundationHeight + file.buildingHeight / 2,
-                        Math.sin(angle) * fileR
+                        Math.sin(angle) * clusterR
                     );
-                    file.orbitRadius = fileR;
+                    file.orbitRadius = clusterR;
                 }
                 fileIdx += count;
                 ring++;

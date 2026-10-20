@@ -402,3 +402,23 @@
 |||    - 0 JS errors ✓
 |||    - Camera: angled 3D perspective at (0, 11328, 11328) ✓
 |||    - Screenshot: examples/phource-example14.png
+
+## Session 26 — File Clustering Around Directory Nodes
+|||**Goal**: Move file placement from spread-out concentric arcs to tight clusters around their parent directory spheres, while directories stay on concentric rings.
+|||
+|||**Changes**:
+|||1. **calculateOrbitalLayout**: Modified file placement in the angular sector tree:
+|||    - `ringStep` reduced from `Math.max(FILE_SPHERE_RADIUS * 10, MIN_FILE_GAP) + 20` (= 60) to `Math.max(FILE_SPHERE_RADIUS * 10, MIN_FILE_GAP * 0.3) + 10` (= 22) — files pack 2.7x tighter
+|||    - `baseOffset` changed from `(ring + 1) * ringStep` (= 110+ for first ring) to `nodeSize + 20` (= 70) — files start just past the directory sphere, not at a wide offset
+|||    - Variable name: `fileR` → `clusterR` to reflect clustered placement
+|||    - Files now form tight clusters around each directory sphere instead of spreading across concentric arcs
+|||2. Cache version bumped: phource.js?v=47 → ?v=48
+|||
+|||**Verification**:
+|||    - 0 overlaps at ALL scrub positions: 0%, 25%, 50%, 75%, 100% ✓
+|||    - 992 nodes, 0 overlapping pairs, maxOverlap=0 ✓
+|||    - 175 road lines (parent-child beams) ✓
+|||    - Ikeda styling: 0% colored pixels, 94.4% pure black ✓
+|||    - 0 JS errors ✓
+|||    - Screenshot: examples/phource-example16.png
+|||    - GitHub: https://github.com/lravkov/phource (repo created, initial commit pushed)
