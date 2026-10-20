@@ -1,0 +1,16 @@
+{
+  "name": "phource",
+  "version": "0.1.0",
+  "description": "3D evolution visualization combining gource's time-based animation with city-blocks' loc-proportional file volumes",
+  "bin": {
+    "phource": "bin/phource.js"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "gen-log": "python3 scripts/generate-log.py"
+  },
+  "dependencies": {
+    "express": "5.1.0",
+    "three": "^0.164.1"
+  }
+}

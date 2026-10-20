@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>phource</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000000; }
+        #canvas { width: 100vw; height: 100vh; display: block; }
+        #tooltip {
+            position: absolute;
+            display: none;
+            background-color: rgba(0, 0, 0, 0.85);
+            color: #ffffff;
+            padding: 8px;
+            border: 1px solid #ffffff;
+            border-radius: 0;
+            pointer-events: none;
+            font-family: 'Courier New', monospace;
+            font-size: 11px;
+            white-space: nowrap;
+            z-index: 100;
+        }
+        #tooltip strong { font-size: 14px; display: block; margin-bottom: 5px; }
+        #tooltip ul { margin: 0; padding: 0 0 0 18px; list-style-type: disc; }
+        #tooltip li { margin-bottom: 3px; }
+        #ui-overlay {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 10;
+            color: #ffffff;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            letter-spacing: 1px;
+        }
+        #date-display { font-weight: normal; }
+        #scrubber-container {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 50px;
+            background: rgba(0, 0, 0, 0.85);
+            display: flex;
+            align-items: center;
+            padding: 0 15px;
+            gap: 10px;
+            z-index: 100;
+            box-sizing: border-box;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        #time-scrubber {
+            flex: 1;
+            height: 20px;
+            -webkit-appearance: none;
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 10px;
+            outline: none;
+        }
+        #time-scrubber::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 16px;
+            height: 26px;
+            border-radius: 8px;
+            background: #ffffff;
+            cursor: pointer;
+            box-shadow: 0 0 8px rgba(0,0,0,0.5);
+        }
+        #time-scrubber:hover::-webkit-slider-thumb {
+            background: #ffffff;
+        }
+        #scrubber-date {
+            color: #ffffff;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            min-width: 200px;
+            text-align: center;
+        }
+        #play-pause-btn {
+            background: rgba(255, 255, 255, 0.8);
+            color: white;
+            border: none;
+            border-radius: 5px;
+            padding: 5px 12px;
+            font-family: Arial, sans-serif;
+            font-size: 13px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        #play-pause-btn:hover {
+            background: rgba(255, 255, 255, 1);
+        }
+        #scrubber-container.hidden { display: none; }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <div id="tooltip"></div>
+    <div id="ui-overlay"><span id="date-display"></span></div>
+    <div id="scrubber-container" class="hidden">
+        <button id="play-pause-btn" title="Pause">Pause</button>
+        <input type="range" id="time-scrubber" min="0" max="1000" value="0">
+        <span id="scrubber-date"></span></div>
+
+    <!-- Error handler — must be before module scripts -->
+    <script>
+    window.__phourceError = null;
+    window.addEventListener('error', function(e) {
+        window.__phourceError = e.message + ' at ' + e.filename + ':' + e.lineno + ':' + e.colno;
+    }, true);
+    window.addEventListener('unhandledrejection', function(e) {
+        window.__phourceError = 'Promise rejection: ' + String(e.reason);
+    }, true);
+    </script>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "/js/three/three.module.js",
+                "three/addons/": "/js/three/addons/"
+            }
+        }
+    </script>
+    <script type="module" src="phource.js?v=47"></script>
+</body>
+</html>
