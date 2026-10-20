@@ -354,10 +354,9 @@ function calculateOrbitalLayout(rootNode) {
         // Place files within parent's angular sector on concentric arcs
         if (files.length > 0) {
             const nodeSize = (node.forceSize || 50) / 2;
-            const parentRadius = depth > 0 ?
-                Math.sqrt(node.targetPos.x ** 2 + node.targetPos.z ** 2) : 0;
-            // Cluster files tightly around parent directory (not on wide concentric rings)
-            const baseOffset = nodeSize + 20;  // Just past the directory sphere
+            // Cluster files in a CIRCLE around the parent directory's position
+            // (not along radial arcs from origin). Files orbit the directory sphere.
+            const baseOffset = nodeSize + 20;
             const ringStep = Math.max(FILE_SPHERE_RADIUS * 10, MIN_FILE_GAP * 0.3) + 10;
 
             // Sort by size (largest first for better packing)
@@ -367,10 +366,15 @@ function calculateOrbitalLayout(rootNode) {
                 return bs - as;
             });
 
+            // Anchor: the parent directory's (x, z) position
+            const anchorX = node.targetPos.x;
+            const anchorZ = node.targetPos.z;
+
             let fileIdx = 0, ring = 0;
             while (fileIdx < sorted.length) {
-                const clusterR = parentRadius + baseOffset + ring * ringStep;
-                const arcLength = sectorAngle * clusterR;
+                const offset = baseOffset + ring * ringStep;
+                // Files placed in circular arc around the anchor position
+                const arcLength = sectorAngle * offset;
                 const capacity = Math.max(1, Math.floor(arcLength / (ringStep * 1.5)));
                 const count = Math.min(capacity, sorted.length - fileIdx);
                 for (let j = 0; j < count; j++) {
@@ -378,11 +382,13 @@ function calculateOrbitalLayout(rootNode) {
                     file.parentDir = node;
                     const angle = startAngle + ((j + 0.5) / count) * sectorAngle;
                     file.targetPos = new THREE.Vector3(
-                        Math.cos(angle) * clusterR,
+                        anchorX + Math.cos(angle) * offset,
                         node.foundationHeight + file.buildingHeight / 2,
-                        Math.sin(angle) * clusterR
+                        anchorZ + Math.sin(angle) * offset
                     );
-                    file.orbitRadius = clusterR;
+                    file.orbitRadius = Math.sqrt(
+                        file.targetPos.x ** 2 + file.targetPos.z ** 2
+                    );
                 }
                 fileIdx += count;
                 ring++;
