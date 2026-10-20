@@ -442,3 +442,20 @@
 |||    - Ikeda styling: 0% colored pixels, 94.4% pure black ✓
 |||    - 0 JS errors ✓
 |||    - Screenshot: examples/phource-example18.png
+
+## Session 29 — Slower Animation Speed
+|||**Goal**: Slow down simulation playback so individual commits are visible during tree growth.
+|||
+|||**Changes**:
+|||1. **DAYS_PER_SECOND**: Reduced from 30.0 to 2.0 — simulation now takes ~26 seconds (was ~1.8s)
+|||    - Previously: ~30 days/sec, processing ~17 commits per frame at 60fps — too fast to see growth
+|||    - Now: ~2 days/sec, ~0.5 commits per frame — tree grows visibly commit-by-commit
+|||    - Commit progression: 0%→82% in first 5s (page load), then 82%→100% over ~15s
+|||2. Cache version bumped: phource.js?v=50 → ?v=51
+|||
+|||**Verification**:
+|||    - Auto-pause: 1867/1867 commits, 0 overlaps ✓
+|||    - 983 nodes, 0 overlapping, 0 maxOverlap ✓
+|||    - 166 road lines ✓
+|||    - Ikeda styling: 0% colored, 94.5% pure black ✓
+|||    - 0 JS errors ✓
