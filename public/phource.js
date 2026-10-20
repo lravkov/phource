@@ -19,7 +19,7 @@ const MIN_LAYOUT_DIMENSION = 5;
 const BASE_FOUNDATION_COLOR = new THREE.Color(0xdddddd);
 const FOUNDATION_DARKEN_PER_LEVEL = 0.08;
 const GROUND_MATERIAL_COLOR = 0x0d2818;
-const DAYS_PER_SECOND = 2.0;  // Slowed from 30.0 for watchable commit-by-commit growth
+const SECONDS_PER_COMMIT = 3.0;  // Each commit visible for 3 seconds of animation time
 const USER_IDLE_TIME = 6.0;
 const BEAM_DURATION = 1.2;
 const LERP_FACTOR = 0.12;
@@ -68,6 +68,8 @@ let lastUserInteraction = 0;
 const AUTO_FIT_COOLDOWN = 2000;
 let dtSum = 0;
 let frameCount = 0;
+let _timeSinceLastCommit = 0;
+let _cameraTargetY = null;  // null = no pending lerp target
 
 // Road (connection line) state — Ikeda: thin white wireframe lines
 let roadLines = [];
@@ -196,6 +198,19 @@ function findOrCreateDir(filepath) {
             dir = createDirNode(partName, pathSegments.join('/'), currentDir.depth + 1);
             currentDir.childDirectories.push(dir);
         }
+        currentDir = dir;
+    }
+    return currentDir;
+}
+
+function getNodeByPath(filepath) {
+    const parts = filepath.split('/');
+    parts.pop();
+    let currentDir = root;
+    for (const partName of parts) {
+        if (!partName) continue;
+        const dir = currentDir.childDirectories.find(d => d.name === partName);
+        if (!dir) return null;
         currentDir = dir;
     }
     return currentDir;
@@ -1133,12 +1148,26 @@ function processCommit(entry) {
 function updateSimulation(dt) {
     if (!simStarted || !logEntries.length) return;
 
-    simTime += dt * 86400.0 * DAYS_PER_SECOND;
+    _timeSinceLastCommit += dt;
 
-    while (commitIndex < logEntries.length &&
-           logEntries[commitIndex].timestamp <= simTime) {
-        processCommit(logEntries[commitIndex]);
-        commitIndex++;
+    if (commitIndex < logEntries.length && _timeSinceLastCommit >= SECONDS_PER_COMMIT) {
+        // Process all commits at the current timestamp (batch)
+        const currentTs = logEntries[commitIndex].timestamp;
+        while (commitIndex < logEntries.length &&
+               logEntries[commitIndex].timestamp <= currentTs + 1) {
+            processCommit(logEntries[commitIndex]);
+            commitIndex++;
+        }
+        simTime = currentTs;
+        _timeSinceLastCommit = 0;
+
+        if (treeDirty) {
+            rebuildLayout();
+            cameraNeedsAutoFit = true;
+        }
+
+        // Predictive camera zoom: look ahead at upcoming commits
+        predictCameraZoom();
     }
 
     // Stop simulation when all commits are processed
@@ -1370,12 +1399,46 @@ function positionCamera() {
     const w = root.calculatedOuterWidth || 100;
     const d = root.calculatedOuterDepth || 100;
     const camDistance = Math.max(w, d) * 0.8;
-    // Gource-style: angled 3D perspective showing tree depth
-    const camHeight = camDistance * 0.6;
-    const camDepth = camDistance * 0.6;
-    camera.position.set(0, camHeight, camDepth);
+    // Top-down view: camera directly above looking straight down (Ikeda monochrome aesthetic)
+    camera.position.set(0, camDistance, 0);
     controls.target.set(0, 0, 0);
     controls.update();
+}
+
+// === Predictive Camera Zoom ===
+// Looks ahead at upcoming commits to estimate future scene bounds and
+// lerps the camera zoom accordingly so the tree never shrinks out of view.
+function predictCameraZoom() {
+    if (!root || commitIndex >= logEntries.length) {
+        _cameraTargetY = null;
+        return;
+    }
+
+    const w = root.calculatedOuterWidth || 100;
+    const d = root.calculatedOuterDepth || 100;
+    const currentDistance = Math.max(w, d) * 0.8;
+
+    // Look ahead at next 5 commits to predict growth
+    const lookahead = 5;
+    let maxFutureDistance = currentDistance;
+    for (let i = 0; i < lookahead && commitIndex + i < logEntries.length; i++) {
+        const futureEntry = logEntries[commitIndex + i];
+        const futureNode = getNodeByPath(futureEntry.filepath);
+        if (futureNode && futureNode.isDirectory) {
+            // Estimate this directory's eventual radius based on depth
+            const futureRadius = futureNode.depth * ORBIT_DIR_RADIUS;
+            maxFutureDistance = Math.max(maxFutureDistance, futureRadius * 1.2);
+        }
+    }
+
+    // Also factor in overall growth trend: remaining commits likely expand tree
+    const remaining = logEntries.length - commitIndex;
+    const total = logEntries.length;
+    const growthPadding = (remaining / total) * 0.4;  // up to 40% extra on first commit
+    const targetDistance = maxFutureDistance * (1 + growthPadding);
+
+    _cameraTargetY = targetDistance;
+    cameraNeedsAutoFit = true;
 }
 
 // === Time scrubber ===
@@ -1567,9 +1630,15 @@ function animate(timestamp) {
             const w = root ? (root.calculatedOuterWidth || 100) : 100;
             const d = root ? (root.calculatedOuterDepth || 100) : 100;
             const camDistance = Math.max(w, d) * 0.8;
-            const camHeight = camDistance * 0.6;
-            const camDepth = camDistance * 0.6;
-            camera.position.set(0, camHeight, camDepth);  // Gource-style angled 3D perspective
+            // Top-down view with lerp zoom: camera directly above looking straight down
+            // Use predictive target if available, otherwise use current scene bounds
+            const targetY = _cameraTargetY !== null ? _cameraTargetY : camDistance;
+            const camY = Math.max(camDistance, targetY);
+            // Lerp for smooth zoom transitions
+            camera.position.lerp(
+                new THREE.Vector3(0, camY, 0),
+                0.15
+            );
             controls.target.set(0, 0, 0);  // Look at tree center
             controls.update();
             cameraNeedsAutoFit = false;
@@ -1604,6 +1673,7 @@ function animate(timestamp) {
 window.__phourceDebug = {
     get sceneChildren() { return scene ? scene.children.length : 0; },
     get roadLineCount() { return scene ? scene.children.filter(c => c.userData && c.userData.parent && c.userData.child).length : 0; },
+    get cameraInfo() { return camera ? { x: camera.position.x, y: camera.position.y, z: camera.position.z } : null; },
     get sceneObjects() {
         if (!scene) return [];
         return scene.children.map(c => c.userData ? c.userData.type + ':' + (c.userData.nodeData ? c.userData.nodeData.name : c.userData.userName || '?') : c.type);
@@ -1670,9 +1740,8 @@ window.__phourceDebug = {
         const w = root.calculatedOuterWidth || 100;
         const d = root.calculatedOuterDepth || 100;
         const camDistance = Math.max(w, d) * 0.8;
-        const camHeight = camDistance * 0.6;
-        const camDepth = camDistance * 0.6;
-        camera.position.set(0, camHeight, camDepth);  // Gource-style angled 3D perspective
+        // Top-down view: camera directly above looking straight down
+        camera.position.set(0, camDistance, 0);
         controls.target.set(0, 0, 0);  // Look at tree center
         controls.update();
     },
