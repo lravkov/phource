@@ -460,21 +460,12 @@
 ||||    - Ikeda styling: 0% colored, 94.5% pure black ✓
 ||||    - 0 JS errors ✓
 
-## Session 30 — Top-Down Camera, SECONDS_PER_COMMIT, Predictive Zoom
-|||**Changes**:
-|||1. **DAYS_PER_SECOND → SECONDS_PER_COMMIT = 3.0**: Replaced time-based continuous simulation speed with commit-paced timing. Each commit batch visible for 3 seconds, giving users time to see the tree growing.
-|||2. **Top-down camera**: Changed `positionCamera()` and `animate()` auto-fit to position camera directly above (0, camDistance, 0) instead of the previous angled 3D perspective (0, camHeight, camDepth). Camera Z is now ~0 (straight down).
-|||3. **Lerp camera zoom**: Camera position now lerps toward target instead of snapping, for smoother transitions.
-|||4. **Predictive zoom** (`predictCameraZoom()`): After each commit, looks ahead at next 5 commits to estimate future scene bounds based on directory depth, and adjusts camera distance accordingly. Growth padding factor based on remaining commits.
-|||5. **getNodeByPath()**: Added lookup function for predictive zoom to find directory nodes by file path.
-|||6. **Debug `cameraInfo`** getter added to `__phourceDebug`.
-|||7. Cache version bumped to v=52.
+## Session 31 — SECONDS_PER_COMMIT Tweak to 0.5
+|||**Change**: Reduced SECONDS_PER_COMMIT from 3.0 to 0.5. At 3.0 the full animation took ~12+ minutes (too slow). At 0.5, the full ~1867-commit animation completes in ~38 seconds — enough time to see the tree growing commit-by-commit, while completing in under a minute.
 |||
 |||**Verification**:
-|||    - Top-down camera: Z=0.02, Y=17103 (directly overhead) ✓
-|||    - Commit pacing: ~1 batch per 3s, commits visible for full duration ✓
-|||    - Camera zoom lerps smoothly (17103→18528 over 15s) ✓
-|||    - 0 overlaps at scrub positions ✓
-|||    - 175 road lines ✓
-|||    - Ikeda styling: 0% colored, 94.7% pure black ✓
+|||    - Top-down camera: Z=0.02 ✓
+|||    - Commit pacing: 80.7% reached at 24s, ~38s estimated total ✓
+|||    - Camera zoom lerps smoothly: 18637→19452 ✓
+|||    - 0 overlaps, 0% colored, 93.1% pure black ✓
 |||    - 0 JS errors ✓
