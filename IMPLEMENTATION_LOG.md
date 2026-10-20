@@ -422,3 +422,23 @@
 |||    - 0 JS errors ✓
 |||    - Screenshot: examples/phource-example16.png
 |||    - GitHub: https://github.com/lravkov/phource (repo created, initial commit pushed)
+
+## Session 28 — Single-Circle File Clustering (DONE)
+|||**Goal**: Replace multi-ring file placement with single circular cluster around each directory sphere — eliminate radial extension.
+|||
+|||**Changes**:
+|||1. **calculateOrbitalLayout**: Replaced multi-ring `while` loop file placement with single-loop `for` loop:
+|||    - All files placed at same radius `clusterRadius = nodeSize + 20` from directory sphere center
+|||    - Full 360° distribution: `angle = (j / count) * Math.PI * 2`
+|||    - No `ringStep`, no `while` overflow to concentric rings — single tight circle
+|||    - Removed sectorAngle constraint for files (full circle around directory)
+|||2. Fixed missing closing brace for `if (files.length > 0)` block
+|||3. Cache version bumped: phource.js?v=50
+|||
+|||**Verification**:
+|||    - 0 overlaps at ALL scrub positions: 0%, 50%, 100% ✓
+|||    - 992 nodes, 0 overlapping pairs, maxOverlap=0 ✓
+|||    - 175 road lines ✓
+|||    - Ikeda styling: 0% colored pixels, 94.4% pure black ✓
+|||    - 0 JS errors ✓
+|||    - Screenshot: examples/phource-example18.png

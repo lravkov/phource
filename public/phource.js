@@ -351,47 +351,38 @@ function calculateOrbitalLayout(rootNode) {
             });
         }
 
-        // Place files within parent's angular sector on concentric arcs
+        // Place files in a circular cluster around each directory sphere
         if (files.length > 0) {
             const nodeSize = (node.forceSize || 50) / 2;
-            // Cluster files in a CIRCLE around the parent directory's position
-            // (not along radial arcs from origin). Files orbit the directory sphere.
-            const baseOffset = nodeSize + 20;
-            const ringStep = Math.max(FILE_SPHERE_RADIUS * 10, MIN_FILE_GAP * 0.3) + 10;
+            // Cluster files in a CIRCLE around the parent directory's position.
+            // All files placed at the same radius (single ring) around the
+            // directory sphere — no radial extension to concentric rings.
+            const clusterRadius = nodeSize + 20;  // Just past the directory sphere
 
-            // Sort by size (largest first for better packing)
+            // Sort by size (largest first)
             const sorted = [...files].sort((a, b) => {
                 const as = Math.max(a.buildingWidth, a.buildingDepth);
                 const bs = Math.max(b.buildingWidth, b.buildingDepth);
                 return bs - as;
             });
 
-            // Anchor: the parent directory's (x, z) position
             const anchorX = node.targetPos.x;
             const anchorZ = node.targetPos.z;
 
-            let fileIdx = 0, ring = 0;
-            while (fileIdx < sorted.length) {
-                const offset = baseOffset + ring * ringStep;
-                // Files placed in circular arc around the anchor position
-                const arcLength = sectorAngle * offset;
-                const capacity = Math.max(1, Math.floor(arcLength / (ringStep * 1.5)));
-                const count = Math.min(capacity, sorted.length - fileIdx);
-                for (let j = 0; j < count; j++) {
-                    const file = sorted[fileIdx + j];
-                    file.parentDir = node;
-                    const angle = startAngle + ((j + 0.5) / count) * sectorAngle;
-                    file.targetPos = new THREE.Vector3(
-                        anchorX + Math.cos(angle) * offset,
-                        node.foundationHeight + file.buildingHeight / 2,
-                        anchorZ + Math.sin(angle) * offset
-                    );
-                    file.orbitRadius = Math.sqrt(
-                        file.targetPos.x ** 2 + file.targetPos.z ** 2
-                    );
-                }
-                fileIdx += count;
-                ring++;
+            // Place ALL files in a single circular cluster around the directory
+            const count = sorted.length;
+            for (let j = 0; j < count; j++) {
+                const file = sorted[j];
+                file.parentDir = node;
+                const angle = (j / count) * Math.PI * 2;  // Full 360° around directory
+                file.targetPos = new THREE.Vector3(
+                    anchorX + Math.cos(angle) * clusterRadius,
+                    node.foundationHeight + file.buildingHeight / 2,
+                    anchorZ + Math.sin(angle) * clusterRadius
+                );
+                file.orbitRadius = Math.sqrt(
+                    file.targetPos.x ** 2 + file.targetPos.z ** 2
+                );
             }
         }
     })(rootNode, 0, 0, Math.PI * 2);
