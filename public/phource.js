@@ -1103,7 +1103,12 @@ function updateUserAvatars(dt) {
 
         if (userNode.actions.length > 0) {
             // Group actions by current batch (same commit timestamp) and move
-            // toward the average position of all files touched in that batch.
+            // toward the midpoint between the average of all file positions
+            // touched in this batch and the root/parent node position.
+            // This keeps the committor drifting in the central region of the
+            // tree rather than flying to the outer edges when many files are
+            // touched at once (e.g., a fresh repo with all commits at the
+            // same timestamp = one giant batch).
             const firstBatchTs = userNode.actions[0].batchTs;
             const batchFiles = [];
             for (let ai = 0; ai < userNode.actions.length; ai++) {
@@ -1113,36 +1118,40 @@ function updateUserAvatars(dt) {
                     break;  // Actions are in order; stop at next batch
                 }
             }
-            // Average of all file positions in this batch, pulled toward the
-            // root/center so the committor stays within the central region
-            // of the tree instead of flying to the outer edges.
-            const avgPos = new THREE.Vector3(0, USER_HEIGHT, 0);
-            let count = 1;  // Start at 1 to include root anchor
-            // Root/center anchor (at origin, USER_HEIGHT above ground)
+            // Compute average of file positions
+            const fileAvg = new THREE.Vector3(0, 0, 0);
+            let count = 0;
             for (const fileNode of batchFiles) {
                 if (fileNode && fileNode.targetPos) {
                     const fileHeight = fileNode.buildingHeight || 0;
-                    avgPos.x += fileNode.targetPos.x;
-                    avgPos.y += USER_HEIGHT + fileHeight;
-                    avgPos.z += fileNode.targetPos.z;
+                    fileAvg.x += fileNode.targetPos.x;
+                    fileAvg.y += USER_HEIGHT + fileHeight;
+                    fileAvg.z += fileNode.targetPos.z;
                     count++;
                 }
             }
+            // Midpoint between file average and root/center anchor (origin)
+            let avgPos;
             if (count > 0) {
-                avgPos.x /= count;
-                avgPos.y /= count;
-                avgPos.z /= count;
-                const dir = new THREE.Vector3().subVectors(avgPos, userNode.pos);
-                const dist = dir.length();
-                if (dist > 2) {
-                    dir.normalize();
-                    userNode.pos.add(dir.clone().multiplyScalar(dt * USER_SPEED));
-                } else {
-                    // Reached average position — clear entire batch
-                    for (let i = 0; i < batchFiles.length; i++) userNode.actions.shift();
-                }
+                fileAvg.x /= count;
+                fileAvg.y /= count;
+                fileAvg.z /= count;
+                avgPos = new THREE.Vector3(
+                    fileAvg.x / 2,
+                    (fileAvg.y + USER_HEIGHT) / 2,
+                    fileAvg.z / 2
+                );
             } else {
-                userNode.actions.shift();
+                avgPos = new THREE.Vector3(0, USER_HEIGHT, 0);
+            }
+            const dir = new THREE.Vector3().subVectors(avgPos, userNode.pos);
+            const dist = dir.length();
+            if (dist > 2) {
+                dir.normalize();
+                userNode.pos.add(dir.clone().multiplyScalar(dt * USER_SPEED));
+            } else {
+                // Reached average position — clear entire batch
+                for (let i = 0; i < batchFiles.length; i++) userNode.actions.shift();
             }
         }
 
@@ -1280,7 +1289,7 @@ function updateBeamActions(dt) {
             points = pts.slice(0, cutoff);
         } else {
             // Direct beam fallback (root-level files or BEAM_FOLLOW_TREE=false)
-            const userPos = ba.user.pos;
+            const userPos = ba.user.pos.clone();  // Clone — beam offset must NOT mutate user pos
             const filePos = new THREE.Vector3(
                 ba.file.targetPos.x,
                 Math.max(ba.file.buildingHeight, 0.1) / 2,
@@ -2133,6 +2142,34 @@ window.__phourceDebug = {
     get controlTarget() { return controls ? Array.from(controls.target) : null; },
     get simState() { return { simStarted, simTime, commitIndex, fileMapSize: fileMap.size, usersSize: users.size, beamCount: beamActions.length, maxCommitCount, dtSum, frameCount, isScrubbing, simPaused, minTs: minTimestamp, maxTs: maxTimestamp }; },
     get rootDims() { return root ? { w: root.calculatedOuterWidth, d: root.calculatedOuterDepth } : null; },
+    get userDebug() {
+        if (!users || users.size === 0) return null;
+        const u = users.values().next().value;
+        if (!u) return null;
+        const actions = u.actions || [];
+        let fileSumX = 0, fileSumZ = 0, validCount = 0;
+        let minBatchTs = Infinity, maxBatchTs = -Infinity;
+        for (const a of actions) {
+            if (a.batchTs < minBatchTs) minBatchTs = a.batchTs;
+            if (a.batchTs > maxBatchTs) maxBatchTs = a.batchTs;
+            if (a.fileNode && a.fileNode.targetPos) {
+                fileSumX += a.fileNode.targetPos.x;
+                fileSumZ += a.fileNode.targetPos.z;
+                validCount++;
+            }
+        }
+        return {
+            actionCount: actions.length,
+            validFileCount: validCount,
+            fileAvgX: Math.round(fileSumX / Math.max(validCount, 1)),
+            fileAvgZ: Math.round(fileSumZ / Math.max(validCount, 1)),
+            midpointX: Math.round(fileSumX / Math.max(validCount, 1) / 2),
+            midpointZ: Math.round(fileSumZ / Math.max(validCount, 1) / 2),
+            userX: Math.round(u.pos.x),
+            userZ: Math.round(u.pos.z),
+            batchTsRange: minBatchTs + '-' + maxBatchTs,
+        };
+    },
     repositionCamera: function() {
         if (!root || !camera || !controls) return;
         const w = root.calculatedOuterWidth || 100;
