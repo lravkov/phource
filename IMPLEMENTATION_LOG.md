@@ -691,3 +691,17 @@
 - Overlaps: 0 at all scrub positions, 0 after async settling
 - JS errors: 0
 - Cache version: v=67 → v=68
+
+## Session 43 — Mouse control remapping
+
+**Change**: Swapped OrbitControls mouse button mappings in `public/phource.js` (after line 1372):
+- LEFT click + drag: now **pan** (was orbit/rotate)
+- RIGHT click + drag: now **orbit/rotate** (was pan)
+- MIDDLE click + drag: **pan** (unchanged)
+- Added `contextmenu` preventer on canvas to suppress browser context menu on right-click (now used for orbit)
+
+**Verification**:
+- LEFT=2(PAN), MIDDLE=2(PAN), RIGHT=0(ROTATE) confirmed via debug bridge
+- 0 JS errors
+- Scrub to 70%: 0.18s, 0 overlaps
+- Cache version: v=68 → v=69

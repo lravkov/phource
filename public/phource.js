@@ -1371,6 +1371,18 @@ function setupScene() {
     controls.maxDistance = 500000;
     controls.maxPolarAngle = Math.PI;
 
+    // Remap mouse controls: LEFT=pan, MIDDLE=pan, RIGHT=orbit
+    // (was: LEFT=orbit, RIGHT=pan, MIDDLE=pand)
+    controls.mouseButtons = {
+        LEFT: THREE.MOUSE.PAN,
+        MIDDLE: THREE.MOUSE.PAN,
+        RIGHT: THREE.MOUSE.ROTATE,
+    };
+    // Prevent browser context menu on right-click (now used for orbit)
+    renderer.domElement.addEventListener('contextmenu', function(e) {
+        e.preventDefault();
+    });
+
     // Track user interaction to avoid overriding manual camera adjustments
     ['pointerdown', 'wheel', 'touchstart'].forEach(evt => {
         renderer.domElement.addEventListener(evt, () => {
