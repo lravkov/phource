@@ -832,6 +832,9 @@ function updateFileMesh(fileNode, dt) {
         // Hide by setting scale to 0
         fileInstancedMesh.setMatrixAt(id, new THREE.Matrix4());
         fileInstancedMesh.instanceMatrix.needsUpdate = true;
+        // Mark for tree removal (deferred to avoid forEach mutation during updateAllMeshes walk)
+        if (fileNode.parentDir) fileNode.parentDir.pendingRemovalFiles = fileNode.parentDir.pendingRemovalFiles || [];
+        fileNode.parentDir.pendingRemovalFiles.push(fileNode.fullPath);
     }
 }
 
@@ -917,6 +920,22 @@ function updateAllMeshes(dt) {
     });
 
     updateRoadLines();
+
+    // Process deferred file tree removals (from updateFileMesh cleanup)
+    // This runs after the forEach walk to avoid mutation during iteration
+    if (root) {
+        (function processRemovals(node) {
+            if (node.isDirectory) {
+                if (node.pendingRemovalFiles && node.pendingRemovalFiles.length > 0) {
+                    for (const filepath of node.pendingRemovalFiles) {
+                        removeFileFromTree(filepath);
+                    }
+                    node.pendingRemovalFiles = [];
+                }
+                node.childDirectories.forEach(child => processRemovals(child));
+            }
+        })(root);
+    }
 }
 
 // === Road (connection line) rendering ===
@@ -1174,7 +1193,9 @@ function processCommit(entry) {
             fileNode.targetAlpha = 0;
             fileNode.fadingOut = true;
             fileNode.pendingRemoval = true;
-            removeFileFromTree(entry.filepath);
+            // Do NOT call removeFileFromTree here — keeping the file in
+            // childFiles lets updateFileMesh fade out the instance properly.
+            // cleanupTreeRemoveFile handles tree removal after fade-out.
         }
     }
 
@@ -1966,6 +1987,48 @@ window.__phourceDebug = {
             }
         }
         return { instanceCount: fileInstanceCount, hasInstanceColor: true, samples };
+    },
+    checkOrphanedFiles: function() {
+        if (!fileMap) return { total: 0, orphaned: [] };
+        const orphaned = [];
+        for (const [path, f] of fileMap.entries()) {
+            if (!f.parentDir || !f.parentDir.targetPos || !f.targetPos) continue;
+            if (f.pendingRemoval) continue;
+            const dx = f.targetPos.x - f.parentDir.targetPos.x;
+            const dz = f.targetPos.z - f.parentDir.targetPos.z;
+            const dist = Math.sqrt(dx*dx + dz*dz);
+            const expectedDist = (f.parentDir.forceSize || 50) + (f.forceSize || 10) + 20;
+            if (dist > expectedDist * 3) {
+                orphaned.push({
+                    path,
+                    dist: Math.round(dist),
+                    expected: Math.round(expectedDist),
+                    targetPos: [Math.round(f.targetPos.x), Math.round(f.targetPos.z)],
+                    parentDir: f.parentDir.name,
+                    parentPos: [Math.round(f.parentDir.targetPos.x), Math.round(f.parentDir.targetPos.z)],
+                    depth: f.parentDir.depth
+                });
+            }
+        }
+        return { total: fileMap.size, orphanedCount: orphaned.length, orphaned };
+    },
+    checkStaleInstances: function() {
+        // Check for mesh instances that are visible but not in fileMap
+        if (!fileInstancedMesh || !fileMap) return { activeFiles: 0, totalInstances: 0, staleCount: 0 };
+        let staleCount = 0;
+        const staleFiles = [];
+        for (let i = 0; i < fileInstanceCount; i++) {
+            const node = fileInstanceNodes[i];
+            if (node && node.fullPath) {
+                // Check if this instance's file is still active in fileMap
+                const fm = fileMap.get(node.fullPath);
+                if (!fm || fm.instanceId !== i) {
+                    staleCount++;
+                    staleFiles.push({ instanceId: i, path: node.fullPath, instanceIdInNode: node.instanceId, fileMapHas: !!fm });
+                }
+            }
+        }
+        return { activeFiles: fileMap.size, totalInstances: fileInstanceCount, staleCount, staleFiles };
     },
     get fileMaterialInfo() {
         if (!fileInstancedMesh) return { exists: false };

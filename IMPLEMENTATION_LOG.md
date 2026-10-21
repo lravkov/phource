@@ -651,3 +651,19 @@
 |||    - 0 JS errors ✓
 |||    - 0 overlaps ✓
 |||    - Camera jitter: 0.0509% during active sim (unchanged, still PASS) ✓
+
+## Session 41 — Fix floating (visible) instances after delete
+
+|||**Root cause**: When a file was deleted (action='D'), `processCommit` called `removeFileFromTree` immediately. This spliced the file from `parentDir.childFiles`, so `updateAllMeshes` never called `updateFileMesh` on it. The file's mesh instance was never faded out (alpha stayed ≈1.0) and was never cleaned up (the `pendingRemoval && currentAlpha < 0.02` cleanup in `updateFileMesh` never ran). The old instance remained visible at its last position — appearing as a "floating" file disconnected from the tree.
+
+|||**Fix** (deferred tree removal):
+|||- **`processCommit` 'D' branch**: Removed `removeFileFromTree(entry.filepath)` call. Deleted files now stay in the tree with `pendingRemoval=true, targetAlpha=0`, allowing `updateFileMesh` to fade them out properly every frame.
+|||- **`updateFileMesh` cleanup**: After the instance fades out (`currentAlpha < 0.02`), marks the file for deferred tree removal via `parentDir.pendingRemovalFiles` array (avoids Array.forEach mutation during walk).
+|||- **`updateAllMeshes`**: Added a post-walk pass that processes `pendingRemovalFiles` arrays and calls `removeFileFromTree` for each (deferred to avoid forEach mutation during iteration).
+|||
+|||**Verification**:
+|||    - 1867-commit tnom-bot log: 0 stale instances (active=816, total=936) ✓
+|||    - Scrub to 62% (commit 1749): 0 stale instances ✓
+|||    - 0 JS errors ✓
+|||    - 0 overlaps ✓
+|||    - All 4 re-added files properly positioned ✓
