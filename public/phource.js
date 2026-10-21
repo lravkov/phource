@@ -1037,20 +1037,39 @@ const ACTION_COLOURS = {
 };
 
 function createUser(name) {
-    const geometry = new THREE.ConeGeometry(4 * GLOBAL_SCALE, 10 * GLOBAL_SCALE, 6);
-    const material = new THREE.MeshBasicMaterial({
-        color: 0xffffff, transparent: true, opacity: 1, side: THREE.DoubleSide,
+    const r = 4 * GLOBAL_SCALE;
+    const h = 10 * GLOBAL_SCALE;
+    const segs = 6;
+
+    // Black fill cone (on top — covers beam origins so beams appear to emanate from behind)
+    const fillGeo = new THREE.ConeGeometry(r, h, segs);
+    const fillMat = new THREE.MeshBasicMaterial({
+        color: 0x000000,
+        transparent: true, opacity: 1, side: THREE.DoubleSide,
     });
-    material.depthWrite = false;
-    const mesh = new THREE.Mesh(geometry, material);
+    fillMat.depthWrite = false;
+    const mesh = new THREE.Mesh(fillGeo, fillMat);
     mesh.renderOrder = 1;
     mesh.rotation.x = Math.PI / 2;
     scene.add(mesh);
+
+    // White outline cone (slightly larger, BackSide so we see the outline edge)
+    const outlineGeo = new THREE.ConeGeometry(r * 1.1, h * 1.1, segs);
+    const outlineMat = new THREE.MeshBasicMaterial({
+        color: 0xffffff,
+        transparent: true, opacity: 1, side: THREE.BackSide,
+    });
+    outlineMat.depthWrite = false;
+    const outlineMesh = new THREE.Mesh(outlineGeo, outlineMat);
+    outlineMesh.renderOrder = 1;
+    mesh.add(outlineMesh); // Child follows parent position/rotation
+
     const userNode = {
         name, mesh,
         pos: new THREE.Vector3(0, USER_HEIGHT, 0),
         actions: [], lastActionTime: simTime,
         currentAlpha: 1, targetAlpha: 1, fadingOut: false,
+        outlineMesh,
     };
     users.set(name, userNode);
     return userNode;
@@ -1077,6 +1096,10 @@ function updateUserAvatars(dt) {
         userNode.currentAlpha = THREE.MathUtils.lerp(userNode.currentAlpha, userNode.targetAlpha, 0.1);
         mesh.material.opacity = userNode.currentAlpha;
         mesh.material.needsUpdate = true;
+        if (userNode.outlineMesh && userNode.outlineMesh.material) {
+            userNode.outlineMesh.material.opacity = userNode.currentAlpha;
+            userNode.outlineMesh.material.needsUpdate = true;
+        }
 
         if (userNode.actions.length > 0) {
             const action = userNode.actions[0];
@@ -1123,7 +1146,7 @@ function createBeamAction(userNode, fileNode, actionType) {
     material.depthWrite = false;
     const geometry = new THREE.BufferGeometry();
     const beam = new THREE.Line(geometry, material);
-    beam.renderOrder = 2;
+    beam.renderOrder = 0;  // Behind committor (renderOrder=1)
     scene.add(beam);
 
     // Glow sphere at file endpoint — emissive, additive for "impact" effect
@@ -1762,19 +1785,23 @@ function cleanupScene() {
     // Clear pickableObjects (will be rebuilt by createInitialMeshes)
     pickableObjects.length = 0;
 
-    // Remove user meshes
+    // Remove user meshes (including outline child meshes)
     users.forEach(userNode => {
         if (userNode.mesh) {
             scene.remove(userNode.mesh);
-            if (userNode.mesh.geometry) userNode.mesh.geometry.dispose();
-            if (userNode.mesh.material) {
-                if (Array.isArray(userNode.mesh.material)) {
-                    userNode.mesh.material.forEach(m => m.dispose());
-                } else {
-                    userNode.mesh.material.dispose();
+            // Traverse and dispose all children (outline mesh, etc.)
+            userNode.mesh.traverse(child => {
+                if (child.geometry) child.geometry.dispose();
+                if (child.material) {
+                    if (Array.isArray(child.material)) {
+                        child.material.forEach(m => m.dispose());
+                    } else {
+                        child.material.dispose();
+                    }
                 }
-            }
+            });
             userNode.mesh = null;
+            userNode.outlineMesh = null;
         }
     });
 

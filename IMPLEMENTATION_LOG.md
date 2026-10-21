@@ -774,3 +774,32 @@ First attempt used a global `_beamCounter` incrementing per beam, with offset ba
 - Same-path (same fullPath) duplicate offset incidents: **0**
 - 0 JS errors, 3 transient physics overlaps (settle to 0 after convergence)
 - Cache version bumped to v=98
+
+## Session 47 — Committor triangle + beam layering
+
+**Changes in `public/phource.js`**:
+
+### Black triangle with white outline (`createUser`)
+- Replaced single white cone with black fill + white outline:
+  - **Black fill cone** (0x000000): `renderOrder=1`, on top
+  - **White outline cone**: slightly larger (1.1x scale), `THREE.BackSide` so we see the outline edge, `renderOrder=1`
+  - Outline is a child of the fill mesh — follows parent position/rotation automatically
+  - Both fade together via shared `currentAlpha` (opacity applied to both in `updateUserAvatars`)
+
+### Beams behind committor
+- Changed beam `renderOrder` from 2 → 0 so beams render behind the committor
+- Glow spheres remain at `renderOrder=2` (stay on top at file endpoints)
+- Result: beams appear to emanate from behind the triangle
+
+### Revert to direct beams
+- Set `BEAM_FOLLOW_TREE = false` — beams go straight from source to file (per user request)
+- Lateral offset system retained and applied to both direct and tree-following code paths
+
+### Cleanup safety
+- Updated `cleanupScene` user mesh disposal to use `traverse()` — properly disposes outline child's geometry and material
+- Also handles `resetToTime` scrubbing (which calls `cleanupScene`)
+
+**Verification**:
+- 1875/1875 commits, 0 JS errors, 0 overlaps at all scrub positions
+- 76814 triangles rendered, 361 render calls
+- Cache version bumped to v=99
