@@ -1636,15 +1636,21 @@ function animate(timestamp) {
             // Top-down view with lerp zoom: camera directly above looking straight down
             // Use predictive target if available, otherwise use current scene bounds
             const targetY = _cameraTargetY !== null ? _cameraTargetY : camDistance;
-            const camY = Math.max(camDistance, targetY);
-            // Lerp for smooth zoom transitions
-            camera.position.lerp(
-                new THREE.Vector3(0, camY, 0),
-                0.15
-            );
+            const targetCamY = Math.max(camDistance, targetY);
+            // Continuous lerp every frame — don't clear flag, so camera
+            // smoothly follows predictive target updates between commits
+            const currentY = camera.position.y;
+            camera.position.x = 0;
+            camera.position.z = 0;
+            camera.position.y = currentY + (targetCamY - currentY) * 0.08;
             controls.target.set(0, 0, 0);  // Look at tree center
             controls.update();
-            cameraNeedsAutoFit = false;
+            // Clear flag only when simulation is paused/done and camera converged
+            if (simPaused) {
+                if (Math.abs(camera.position.y - targetCamY) < targetCamY * 0.005) {
+                    cameraNeedsAutoFit = false;
+                }
+            }
         }
     }
     if (controls) controls.update();
