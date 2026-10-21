@@ -713,3 +713,20 @@
 - Added proximity fallback: when primary raycast finds no meaningful hit, projects all directory sphere positions to NDC and checks if mouse is within 0.02 NDC (~12px) of any projected center
 - Also fixed raycast iteration to skip invisible file instances in the InstancedMesh (previously `intersects[0]` could be an invisible instance at origin)
 - Tooltip displays: directory name, full path, total LOC, total commit count
+
+## Session 45 — Tooltip forgiveness zone fix
+
+**Bug**: Mouseover tooltips didn't appear when directly over a directory node — user had to shift the mouse along the circumference to trigger highlighting.
+
+**Root causes**:
+1. `onMouseMove` set mouse NDC but didn't call `updateTooltip()` — tooltips only updated in render loop (too slow during active sim)
+2. Proximity check only ran when raycast missed (`if (!nodeData)`) — if raycast hit an occluding file instance, the directory was never checked
+3. NDC-based distance threshold gave inconsistent pixel forgiveness across resolutions
+
+**Fixes in `public/phource.js`**:
+- `onMouseMove` now calls `updateTooltip()` directly on every mouse move
+- Proximity check always runs (not gated on raycast miss)
+- If directory is within 10px of mouse, override raycast result (handles occluding files)
+- Directory used when within 30px and raycast found nothing
+- Switched to screen-space pixel distance (30px) for consistent forgiveness zone
+- Used `getWorldPosition()` for exact mesh projection

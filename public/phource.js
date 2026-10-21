@@ -1316,33 +1316,37 @@ function updateTooltip() {
         }
     }
     // Fallback: proximity check for directory spheres (too small to reliably raycast at distance)
-    if (!nodeData && pickableObjects.length > 0) {
-        const PROXIMITY_PIXELS = 30; // forgiveness zone: 30px radius regardless of screen size
-        let closest = null;
-        let closestDist = Infinity;
-        for (let i = 0; i < pickableObjects.length; i++) {
-            const obj = pickableObjects[i];
-            if (obj.userData && obj.userData.type === 'Directory' && obj.userData.nodeData) {
-                const pos = obj.position.clone();
-                pos.y = obj.scale.y * 0.5;
-                const ndc = pos.clone().project(camera);
-                const screenX = ((ndc.x + 1) / 2) * window.innerWidth;
-                const screenY = ((-ndc.y + 1) / 2) * window.innerHeight;
-                const mouseScreenX = ((mouse.x + 1) / 2) * window.innerWidth;
-                const mouseScreenY = ((-mouse.y + 1) / 2) * window.innerHeight;
-                const dist = Math.sqrt(
-                    Math.pow(screenX - mouseScreenX, 2) + Math.pow(screenY - mouseScreenY, 2)
-                );
-                if (dist < PROXIMITY_PIXELS && dist < closestDist) {
-                    closestDist = dist;
-                    closest = obj;
-                }
+    // Always run this — the raycast may hit an occluding file instance or miss the tiny sphere entirely
+    const PROXIMITY_PIXELS = 30; // forgiveness zone: 30px radius regardless of screen size
+    let closest = null;
+    let closestDist = Infinity;
+    for (let i = 0; i < pickableObjects.length; i++) {
+        const obj = pickableObjects[i];
+        if (obj.userData && obj.userData.type === 'Directory' && obj.userData.nodeData) {
+            const pos = new THREE.Vector3();
+            obj.getWorldPosition(pos);
+            const ndc = pos.clone().project(camera);
+            const screenX = ((ndc.x + 1) / 2) * window.innerWidth;
+            const screenY = ((-ndc.y + 1) / 2) * window.innerHeight;
+            const mouseScreenX = ((mouse.x + 1) / 2) * window.innerWidth;
+            const mouseScreenY = ((-mouse.y + 1) / 2) * window.innerHeight;
+            const dist = Math.sqrt(
+                Math.pow(screenX - mouseScreenX, 2) + Math.pow(screenY - mouseScreenY, 2)
+            );
+            if (dist < PROXIMITY_PIXELS && dist < closestDist) {
+                closestDist = dist;
+                closest = obj;
             }
         }
-        if (closest) {
-            nodeData = closest.userData.nodeData;
-            type = 'Directory';
-        }
+    }
+    // Prefer directory hit if mouse is very close (within 10px — likely directly over the sphere)
+    if (closest && closestDist < 10) {
+        nodeData = closest.userData.nodeData;
+        type = 'Directory';
+    } else if (closest && !nodeData) {
+        // Only use proximity directory if raycast found nothing
+        nodeData = closest.userData.nodeData;
+        type = 'Directory';
     }
     if (nodeData !== intersectedObject) {
         intersectedObject = nodeData;
