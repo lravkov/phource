@@ -246,6 +246,10 @@ function addFileToTree(filepath, loc, count, colourHex, actionType) {
         fileNode.count = count;
         fileNode.colourHex = colourHex || '';
         if (actionType) fileNode.actionType = actionType;
+        // Re-activate file that was previously deleted (action='D' then 'A'/'M')
+        fileNode.targetAlpha = 1;
+        fileNode.fadingOut = false;
+        fileNode.pendingRemoval = false;
     } else {
         fileNode = createFileNode(fileName, filepath, loc, count, colourHex, parentDir.depth + 1, actionType);
         parentDir.childFiles.push(fileNode);
@@ -781,6 +785,7 @@ function addFileInstance(fileNode) {
     const s = fileNode.forceSize || 10;
     // Fade-in + scale-up: start small and transparent, lerp to full size/alpha
     fileNode.currentScale = 0;
+    fileNode.currentAlpha = 0;
     // Spawn from a random position near parent directory (like gource),
     // then lerp toward targetPos for the "spawning" animation effect
     if (fileNode.parentDir && fileNode.parentDir.targetPos) {
@@ -792,8 +797,6 @@ function addFileInstance(fileNode) {
         fileNode.currentX = fileNode.targetPos.x;
         fileNode.currentZ = fileNode.targetPos.z;
     }
-    // currentAlpha=0, targetAlpha=1 are already set from createFileNode —
-    // let updateFileMesh handle the fade-in via lerp(0.15)
     fileNode.fadingOut = false;
     fileNode.pendingRemoval = false;
 
@@ -1151,6 +1154,10 @@ function processCommit(entry) {
             fileNode.count = entry.count;
             fileNode.colourHex = entry.colour || '';
             fileNode.actionType = 'M';
+            // Re-activate file that was previously deleted
+            fileNode.targetAlpha = 1;
+            fileNode.fadingOut = false;
+            fileNode.pendingRemoval = false;
             const dims = calculateFileDimensions(entry.loc, entry.count);
             fileNode.buildingWidth = dims.width;
             fileNode.buildingDepth = dims.depth;

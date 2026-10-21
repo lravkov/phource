@@ -627,3 +627,27 @@
 |||    - 0 JS errors ✓
 |||    - 0 overlaps ✓
 |||    - Camera Z=0.01 (top-down) ✓
+
+## Session 40 — Fix orphaned (invisible) files after delete+re-add
+|||**Root cause**: When a file was deleted (action='D') then later re-added (action='A') or modified (action='M'), `addFileToTree` found the existing file node and updated its data properties (loc, count, colour) but did NOT reset `targetAlpha`, `fadingOut`, or `pendingRemoval`. The delete had set `targetAlpha=0`, `fadingOut=true`, `pendingRemoval=true`. The re-add left these stale, so:
+|||1. In `updateAllMeshes`: `if (f.instanceId === undefined && !f.pendingRemoval) addFileInstance(f)` — `pendingRemoval` was still true, so `addFileInstance` was never called for re-added files whose instance had been removed during fade-out
+|||2. `updateFileMesh` continued Lerping `currentAlpha` toward `targetAlpha=0` — re-added files stayed invisible
+|||3. Result: files existed in `fileMap` and tree structure but were invisible — appearing "orphaned" in the visualization
+|||
+|||**Affected files in tnom-bot repo** (identified via log analysis):
+|||- `start-bot.bat`: D@1787871854 → A@1787880743 → M@1788199215 → M@1788282527
+|||- `utils/__init__.py`: D@1787872481 → A@1787880743 → M@1788192279 → 3 more Ms
+|||- `utils/math_tools.py`: D@1787872481 → A@1787880743
+|||- `tests/test_math_tools.py`: D@1787879793 → A@1787880743
+|||
+|||**Changes**:
+|||1. **`addFileToTree`**: When existing file found, reset `targetAlpha=1`, `fadingOut=false`, `pendingRemoval=false` — re-activates deleted files
+|||2. **`processCommit` 'M' branch**: Same reset when file found in `fileMap` — handles modify-after-delete
+|||3. **`addFileInstance`**: Explicitly set `currentAlpha=0` — ensures clean fade-in for re-added files (was relying on `createFileNode` init, but re-added files retain residual alpha from fade-out)
+|||4. Cache version bumped: v=64 → v=64 (this fix included in v=64 batch)
+|||
+|||**Verification**:
+|||    - All 4 re-added files in tnom-bot repo: visible with `targetAlpha=1, pendingRemoval=false, fadingOut=false, hasMesh=true` ✓
+|||    - 0 JS errors ✓
+|||    - 0 overlaps ✓
+|||    - Camera jitter: 0.0509% during active sim (unchanged, still PASS) ✓
