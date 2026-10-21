@@ -28,7 +28,7 @@ const BEAM_OPACITY = 0.85;            // Brighter with additive blending
 const BEAM_PROPAGATION_TIME = 0.15;   // 15% of duration for fast path reveal
 const LERP_FACTOR = 0.12;
 const DIR_LAYOUT_LERP = 0.08;
-const USER_SPEED = 60.0;
+const USER_SPEED = 300.0;
 const USER_HEIGHT = 8.0;
 const GLOBAL_SCALE = 0.3;
 
@@ -1037,8 +1037,8 @@ const ACTION_COLOURS = {
 };
 
 function createUser(name) {
-    const r = 12 * GLOBAL_SCALE;
-    const h = 20 * GLOBAL_SCALE;
+    const r = 300 * GLOBAL_SCALE;
+    const h = 200 * GLOBAL_SCALE;
     const segs = 6;
 
     // Black fill cone (on top — covers beam origins so beams appear to emanate from behind)
@@ -1118,10 +1118,16 @@ function updateUserAvatars(dt) {
                     break;  // Actions are in order; stop at next batch
                 }
             }
+            // Limit to the most recent files so the target migrates toward
+            // where the user is actively touching files, rather than averaging
+            // all files in a potentially huge batch (which sits near the
+            // center of mass and makes the committor appear stuck at center).
+            const MAX_BATCH_FILES = 15;
+            const effectiveFiles = batchFiles.slice(Math.max(0, batchFiles.length - MAX_BATCH_FILES));
             // Compute average of file positions
             const fileAvg = new THREE.Vector3(0, 0, 0);
             let count = 0;
-            for (const fileNode of batchFiles) {
+            for (const fileNode of effectiveFiles) {
                 if (fileNode && fileNode.targetPos) {
                     const fileHeight = fileNode.buildingHeight || 0;
                     fileAvg.x += fileNode.targetPos.x;
@@ -1130,19 +1136,23 @@ function updateUserAvatars(dt) {
                     count++;
                 }
             }
-            // Weighted average: 75% toward file positions, 25% toward center anchor.
-            // This keeps the committor migrating toward the files it's touching
-            // rather than sitting dead-center, while still maintaining some
-            // centering when batches span many files across the tree.
+            // Weighted average toward the files touched in this batch,
+            // with a small pull toward the root/center anchor. This keeps
+            // the committor migrating toward the files it's touching with
+            // the beams rather than sitting dead-center, while still
+            // preventing wild excursions when a batch spans many files
+            // spread across the entire tree (e.g., a fresh repo with all
+            // commits at the same timestamp = one giant batch).
+            const FILE_PULL = 0.95;  // 95% toward files, 5% toward center anchor
             let avgPos;
             if (count > 0) {
                 fileAvg.x /= count;
                 fileAvg.y /= count;
                 fileAvg.z /= count;
                 avgPos = new THREE.Vector3(
-                    fileAvg.x * 0.75 + 0 * 0.25,
-                    fileAvg.y * 0.75 + USER_HEIGHT * 0.25,
-                    fileAvg.z * 0.75 + 0 * 0.25
+                    fileAvg.x * FILE_PULL + 0 * (1 - FILE_PULL),
+                    fileAvg.y * FILE_PULL + USER_HEIGHT * (1 - FILE_PULL),
+                    fileAvg.z * FILE_PULL + 0 * (1 - FILE_PULL)
                 );
             } else {
                 avgPos = new THREE.Vector3(0, USER_HEIGHT, 0);
