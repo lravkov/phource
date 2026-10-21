@@ -1102,22 +1102,40 @@ function updateUserAvatars(dt) {
         }
 
         if (userNode.actions.length > 0) {
-            const action = userNode.actions[0];
-            const fileNode = action.fileNode;
-            if (fileNode && fileNode.targetPos) {
-                const fileHeight = fileNode.buildingHeight || 0;
-                const targetPos = new THREE.Vector3(
-                    fileNode.targetPos.x,
-                    USER_HEIGHT + fileHeight,
-                    fileNode.targetPos.z
-                );
-                const dir = new THREE.Vector3().subVectors(targetPos, userNode.pos);
+            // Group actions by current batch (same commit timestamp) and move
+            // toward the average position of all files touched in that batch.
+            const firstBatchTs = userNode.actions[0].batchTs;
+            const batchFiles = [];
+            for (let ai = 0; ai < userNode.actions.length; ai++) {
+                if (userNode.actions[ai].batchTs === firstBatchTs) {
+                    batchFiles.push(userNode.actions[ai].fileNode);
+                } else {
+                    break;  // Actions are in order; stop at next batch
+                }
+            }
+            const avgPos = new THREE.Vector3(0, USER_HEIGHT, 0);
+            let count = 0;
+            for (const fileNode of batchFiles) {
+                if (fileNode && fileNode.targetPos) {
+                    const fileHeight = fileNode.buildingHeight || 0;
+                    avgPos.x += fileNode.targetPos.x;
+                    avgPos.y += USER_HEIGHT + fileHeight;
+                    avgPos.z += fileNode.targetPos.z;
+                    count++;
+                }
+            }
+            if (count > 0) {
+                avgPos.x /= count;
+                avgPos.y /= count;
+                avgPos.z /= count;
+                const dir = new THREE.Vector3().subVectors(avgPos, userNode.pos);
                 const dist = dir.length();
                 if (dist > 2) {
                     dir.normalize();
                     userNode.pos.add(dir.clone().multiplyScalar(dt * USER_SPEED));
                 } else {
-                    userNode.actions.shift();
+                    // Reached average position — clear entire batch
+                    for (let i = 0; i < batchFiles.length; i++) userNode.actions.shift();
                 }
             } else {
                 userNode.actions.shift();
@@ -1387,7 +1405,7 @@ function processCommit(entry) {
 
     if (fileNode && entry.action !== 'D') {
         if (!isScrubbing) {
-            userNode.actions.push({ fileNode, actionType: entry.action });
+            userNode.actions.push({ fileNode, actionType: entry.action, batchTs: entry.timestamp });
             createBeamAction(userNode, fileNode, entry.action);
         }
     }

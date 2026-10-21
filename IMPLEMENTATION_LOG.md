@@ -803,3 +803,27 @@ First attempt used a global `_beamCounter` incrementing per beam, with offset ba
 - 1875/1875 commits, 0 JS errors, 0 overlaps at all scrub positions
 - 76814 triangles rendered, 361 render calls
 - Cache version bumped to v=99
+
+## Session 48 — Batch-average user movement
+
+**Problem**: User moved toward each file individually in a commit, resulting in
+jittery movement when a commit touches many files across the tree.
+
+**Solution** (`public/phource.js`):
+1. `processCommit`: Tag each action with `batchTs: entry.timestamp` so actions
+   from the same commit (same timestamp) can be grouped together
+2. `updateUserAvatars`: Instead of moving toward the first queued file, now
+   groups all actions with the same `batchTs`, computes the average position
+   (including file height: `USER_HEIGHT + buildingHeight`), and moves toward
+   that single target. Maintains the same smooth lerp-based movement.
+   - Average Y accounts for building heights, so tall files pull the user higher
+   - When the user reaches the average (dist ≤ 2), the entire batch is cleared
+   - Falls through to existing idle/fade logic unchanged
+   - D-actions are excluded (they don't push to the actions queue)
+3. No changes to beam creation — beams still originate from the user's position
+   per-file; only the movement target is batched
+
+**Verification** (1875-commit tnom-bot log):
+- Sim completed 1867/1867, 0 JS errors, 0 overlaps at scrub 10%/50%/90%
+- Same-file beam offset dedup still working (0 incidents)
+- Cache version bumped to v=100
