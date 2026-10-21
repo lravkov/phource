@@ -552,3 +552,22 @@
 |||    - Purple beam pixels: 12 detected (M=Modified) ✓
 |||    - Green beam pixels: 0 (green eliminated) ✓
 |||    - No bounces needed during 60–100% phase — future depth calculation pre-positions camera correctly
+
+## Session 36 — Deep File Center Clustering Bug Fix
+|||**Root cause**: When `findOrCreateDir` created new directories during simulation (as files from new paths were committed), those directories were initialized with `targetPos = (0, 0, 0)`. The comment on line 248 explicitly said "Don't set treeDirty for new files", but this also applied to new directories — so `rebuildLayout`/`calculateOrbitalLayout` was never called to reposition them. New files inherited the parent's (0,0,0) position, causing deep files to cluster at the center instead of being placed at their correct depth-based radius.
+|||
+|||**Fix**:
+|||1. `findOrCreateDir`: Set `treeDirty = true` when a new directory is created — triggers `rebuildLayout` on the next frame, which calls `calculateOrbitalLayout` to position ALL directories at correct radial positions by depth
+|||2. Updated misleading comment in `addFileToTree` to clarify that treeDirty is set by findOrCreateDir for new directories only
+|||3. Added `radialDistribution` debug getter to verify node positions across radial bands
+|||4. Cache version bumped: v=54 → v=55
+|||
+|||**Verification**:
+|||    - Full simulation: 1867/1867 commits ✓
+|||    - 0 JS errors ✓
+|||    - 0 overlaps at completion ✓
+|||    - maxR = 12800 (8 depth levels × 1600 ring spacing) ✓
+|||    - Dir distribution: center=1 (root), far=146 (depth 3-7), veryFar=17 (depth 8+) ✓
+|||    - File distribution: far=788, veryFar=11 — deep files at correct radius ✓
+|||    - Camera Z=0.02 (top-down) ✓
+|||    - 175 road lines, no crossing ✓

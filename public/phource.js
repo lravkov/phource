@@ -211,6 +211,9 @@ function findOrCreateDir(filepath) {
         if (!dir) {
             dir = createDirNode(partName, pathSegments.join('/'), currentDir.depth + 1);
             currentDir.childDirectories.push(dir);
+            // Tree structure changed — mark dirty so rebuildLayout repositions
+            // this new directory (and all others) to correct radial positions
+            treeDirty = true;
         }
         currentDir = dir;
     }
@@ -245,7 +248,9 @@ function addFileToTree(filepath, loc, count, colourHex, actionType) {
         fileNode = createFileNode(fileName, filepath, loc, count, colourHex, parentDir.depth + 1, actionType);
         parentDir.childFiles.push(fileNode);
         fileNode.parentDir = parentDir;
-        // Don't set treeDirty for new files — they join the simulation directly
+        // treeDirty is set by findOrCreateDir when new directories are created.
+        // New files in existing directories join the simulation directly —
+        // no layout rebuild needed for files alone.
         // Position new file near parent directory to avoid starting at origin
         fileNode.targetPos.copy(parentDir.targetPos);
         const offset = (parentDir.forceSize || 50) + (fileNode.forceSize || 10) + MIN_FILE_GAP;
@@ -1952,6 +1957,22 @@ window.__phourceDebug = {
             renderCalls: renderer ? renderer.info.render.calls : 0,
             triangles: renderer ? renderer.info.render.triangles : 0,
         };
+    },
+    get radialDistribution() {
+        if (!root || !forceLayoutNodes || forceLayoutNodes.length === 0) return { total: 0 };
+        const bands = { center: 0, near: 0, mid: 0, far: 0, veryFar: 0 };
+        let maxR = 0;
+        const deepFiles = { center: 0, near: 0, mid: 0, far: 0, veryFar: 0 };
+        const deepDirs = { center: 0, near: 0, mid: 0, far: 0, veryFar: 0 };
+        forceLayoutNodes.forEach(n => {
+            if (!n || !n.targetPos) return;
+            const r = Math.sqrt(n.targetPos.x ** 2 + n.targetPos.z ** 2);
+            if (r > maxR) maxR = r;
+            const band = r < 500 ? 'center' : r < 2000 ? 'near' : r < 5000 ? 'mid' : r < 10000 ? 'far' : 'veryFar';
+            if (n.isDirectory) deepDirs[band]++; else deepFiles[band]++;
+            bands[band]++;
+        });
+        return { total: forceLayoutNodes.length, maxR, bands, deepFiles, deepDirs };
     },
 };
 
