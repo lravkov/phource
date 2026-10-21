@@ -779,11 +779,21 @@ function addFileInstance(fileNode) {
     fileNode.instanceId = id;
     fileInstanceNodes[id] = fileNode;
     const s = fileNode.forceSize || 10;
-    fileNode.currentScale = s;
-    fileNode.currentX = fileNode.targetPos.x;
-    fileNode.currentZ = fileNode.targetPos.z;
-    fileNode.currentAlpha = 1;
-    fileNode.targetAlpha = 1;
+    // Fade-in + scale-up: start small and transparent, lerp to full size/alpha
+    fileNode.currentScale = 0;
+    // Spawn from a random position near parent directory (like gource),
+    // then lerp toward targetPos for the "spawning" animation effect
+    if (fileNode.parentDir && fileNode.parentDir.targetPos) {
+        const angle = Math.random() * Math.PI * 2;
+        const spawnDist = (fileNode.parentDir.forceSize || 50) + 30;
+        fileNode.currentX = fileNode.parentDir.targetPos.x + Math.cos(angle) * spawnDist;
+        fileNode.currentZ = fileNode.parentDir.targetPos.z + Math.sin(angle) * spawnDist;
+    } else {
+        fileNode.currentX = fileNode.targetPos.x;
+        fileNode.currentZ = fileNode.targetPos.z;
+    }
+    // currentAlpha=0, targetAlpha=1 are already set from createFileNode —
+    // let updateFileMesh handle the fade-in via lerp(0.15)
     fileNode.fadingOut = false;
     fileNode.pendingRemoval = false;
 
@@ -1961,22 +1971,6 @@ window.__phourceDebug = {
             renderCalls: renderer ? renderer.info.render.calls : 0,
             triangles: renderer ? renderer.info.render.triangles : 0,
         };
-    },
-    get radialDistribution() {
-        if (!root || !forceLayoutNodes || forceLayoutNodes.length === 0) return { total: 0 };
-        const bands = { center: 0, near: 0, mid: 0, far: 0, veryFar: 0 };
-        let maxR = 0;
-        const deepFiles = { center: 0, near: 0, mid: 0, far: 0, veryFar: 0 };
-        const deepDirs = { center: 0, near: 0, mid: 0, far: 0, veryFar: 0 };
-        forceLayoutNodes.forEach(n => {
-            if (!n || !n.targetPos) return;
-            const r = Math.sqrt(n.targetPos.x ** 2 + n.targetPos.z ** 2);
-            if (r > maxR) maxR = r;
-            const band = r < 500 ? 'center' : r < 2000 ? 'near' : r < 5000 ? 'mid' : r < 10000 ? 'far' : 'veryFar';
-            if (n.isDirectory) deepDirs[band]++; else deepFiles[band]++;
-            bands[band]++;
-        });
-        return { total: forceLayoutNodes.length, maxR, bands, deepFiles, deepDirs };
     },
 };
 

@@ -592,3 +592,21 @@
 |||    - maxR=12800 (8 depths × 1600 ring spacing) ✓
 |||    - Camera Z=0.02 (top-down) ✓
 |||    - 175 road lines ✓
+
+## Session 38 — Gource-Style File Spawning
+|||**Root cause**: `addFileInstance` explicitly set `currentAlpha = 1`, `currentScale = s`, and `currentX = targetPos.x`, `currentZ = targetPos.z` — overriding the fade-in alpha and spawn-position randomness that `createFileNode` initialized. Files appeared at full opacity and full size at their final position, with no "spawn" animation.
+|||
+|||**Changes**:
+|||1. **`addFileInstance`**: Removed `currentAlpha = 1` and `targetAlpha = 1` overrides — `createFileNode` already sets `currentAlpha: 0, targetAlpha: 1`. `updateFileMesh` now lerps alpha from 0 → 1 (factor 0.15) for fade-in effect
+|||2. **`addFileInstance`**: Changed `currentScale` from `s` (full size) to `0` — files scale up from nothing as they fade in
+|||3. **`addFileInstance`**: Spawn from random position near parent directory (random angle at `parent.forceSize + 30` distance) instead of at `targetPos` — files "fly in" from random positions to their destination, matching gource's random initial placement + physics pull
+|||4. **Files in existing directories** (no new dir created) also get the spawn effect — they appear one-at-a-time as commits are processed during simulation
+|||5. Cache version bumped: v=57 → v=59
+|||
+|||**Verification**:
+|||    - Full simulation: 1867/1867 commits, 816 files, 992 nodes ✓
+|||    - 0 JS errors ✓
+|||    - 0 overlaps at completion ✓
+|||    - Camera Z=0.02 (top-down) ✓
+|||    - 175 road lines ✓
+|||    - 816 files, 936 instances ✓
