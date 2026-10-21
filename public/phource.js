@@ -22,8 +22,10 @@ const GROUND_MATERIAL_COLOR = 0x0d2818;
 const SECONDS_PER_COMMIT = 0.5;  // Each commit batch visible for 0.5s — middle ground between too-fast (30 days/sec) and too-slow (3s/commit)
 const USER_IDLE_TIME = 6.0;
 const BEAM_DURATION = 1.2;
-const BEAM_FOLLOW_TREE = true;  // Follow tree path (root → dirs → file) vs direct user-to-file
-const BEAM_LINE_WIDTH = 2;       // Thicker than roads (1px) for Ikeda visibility
+const BEAM_FOLLOW_TREE = true;
+const BEAM_LINE_WIDTH = 2;
+const BEAM_OPACITY = 0.85;            // Brighter with additive blending
+const BEAM_PROPAGATION_TIME = 0.15;   // 15% of duration for fast path reveal
 const LERP_FACTOR = 0.12;
 const DIR_LAYOUT_LERP = 0.08;
 const USER_SPEED = 60.0;
@@ -1115,12 +1117,24 @@ function createBeamAction(userNode, fileNode, actionType) {
     const colour = ACTION_COLOURS[actionType] || new THREE.Color(0xffffff);
     const material = new THREE.LineBasicMaterial({
         color: colour, transparent: true, opacity: 0, linewidth: BEAM_LINE_WIDTH,
+        blending: THREE.AdditiveBlending,  // Glow/emission effect on black background
     });
     material.depthWrite = false;
     const geometry = new THREE.BufferGeometry();
     const beam = new THREE.Line(geometry, material);
     beam.renderOrder = 2;
     scene.add(beam);
+
+    // Glow sphere at file endpoint — emissive, additive for "impact" effect
+    const glowSphere = new THREE.Mesh(
+        new THREE.SphereGeometry(3, 8, 6),
+        new THREE.MeshBasicMaterial({
+            color: colour, transparent: true, opacity: 0,
+            blending: THREE.AdditiveBlending, depthWrite: false,
+        })
+    );
+    glowSphere.renderOrder = 2;
+    scene.add(glowSphere);
 
     // Store directory node references (not positions) so the beam path updates
     // dynamically each frame as the orbital layout settles.
@@ -1138,7 +1152,7 @@ function createBeamAction(userNode, fileNode, actionType) {
     }
 
     beamActions.push({
-        user: userNode, file: fileNode, beam,
+        user: userNode, file: fileNode, beam, glowSphere,
         progress: 0, duration: BEAM_DURATION, actionType,
         pathNodes: pathNodes,
     });
@@ -1146,6 +1160,7 @@ function createBeamAction(userNode, fileNode, actionType) {
 
 function updateBeamActions(dt) {
     const roadY = DIR_SPHERE_RADIUS / 2 + 0.5;
+    const propThreshold = BEAM_PROPAGATION_TIME;  // 15% of progress for fast appear
     for (let i = beamActions.length - 1; i >= 0; i--) {
         const ba = beamActions[i];
         ba.progress += dt / ba.duration;
@@ -1153,6 +1168,11 @@ function updateBeamActions(dt) {
             scene.remove(ba.beam);
             ba.beam.geometry.dispose();
             ba.beam.material.dispose();
+            if (ba.glowSphere) {
+                scene.remove(ba.glowSphere);
+                ba.glowSphere.geometry.dispose();
+                ba.glowSphere.material.dispose();
+            }
             beamActions.splice(i, 1);
             continue;
         }
@@ -1174,11 +1194,16 @@ function updateBeamActions(dt) {
                 fileHeight / 2,
                 ba.file.targetPos.z
             ));
-            // Progressive reveal: beam grows from root along the tree toward the file.
-            // Use floor(t * (n-1)) + 2 to guarantee at least one visible segment.
+            // Fast propagation: beam grows along tree path quickly then stays full
             const t = ba.progress;
             const n = pts.length;
-            const cutoff = Math.min(n, Math.floor(t * (n - 1)) + 2);
+            let cutoff;
+            if (t < propThreshold) {
+                const propT = t / propThreshold;
+                cutoff = Math.min(n, Math.floor(propT * (n - 1)) + 2);
+            } else {
+                cutoff = n;
+            }
             points = pts.slice(0, cutoff);
         } else {
             // Direct beam fallback (root-level files or BEAM_FOLLOW_TREE=false)
@@ -1193,9 +1218,33 @@ function updateBeamActions(dt) {
 
         ba.beam.geometry.dispose();
         ba.beam.geometry = new THREE.BufferGeometry().setFromPoints(points);
-        const fadeFactor = 1.0 - Math.abs(ba.progress - 0.5) * 2;
-        ba.beam.material.opacity = 0.7 * Math.max(0, fadeFactor);
+
+        // Fast fade-in during propagation, slow fade-out after
+        let opacity;
+        if (ba.progress < propThreshold) {
+            opacity = BEAM_OPACITY * (ba.progress / propThreshold);
+        } else {
+            const fadeT = (ba.progress - propThreshold) / (1 - propThreshold);
+            opacity = BEAM_OPACITY * (1 - fadeT);
+        }
+        ba.beam.material.opacity = opacity;
         ba.beam.material.needsUpdate = true;
+
+        // Update glow sphere at file endpoint
+        if (ba.glowSphere) {
+            const fileHeight = Math.max(ba.file.buildingHeight || 0, 0.1);
+            ba.glowSphere.position.set(
+                ba.file.targetPos.x, fileHeight / 2, ba.file.targetPos.z
+            );
+            // Pulse glow sphere during propagation, then fade
+            let glowScale = 1;
+            if (ba.progress < propThreshold) {
+                glowScale = 0.5 + 0.5 * (ba.progress / propThreshold);
+            }
+            ba.glowSphere.scale.set(glowScale, glowScale, glowScale);
+            ba.glowSphere.material.opacity = opacity * 0.8;
+            ba.glowSphere.material.needsUpdate = true;
+        }
     }
 }
 
