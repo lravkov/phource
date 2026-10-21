@@ -214,6 +214,7 @@ function findOrCreateDir(filepath) {
         let dir = currentDir.childDirectories.find(d => d.name === partName);
         if (!dir) {
             dir = createDirNode(partName, pathSegments.join('/'), currentDir.depth + 1);
+            dir.parentDir = currentDir;
             currentDir.childDirectories.push(dir);
             // Tree structure changed — mark dirty so rebuildLayout repositions
             // this new directory (and all others) to correct radial positions
@@ -387,6 +388,7 @@ function calculateOrbitalLayout(rootNode) {
         if (dirLocTotal > 0) {
             let angleCursor = startAngle;
             childDirs.forEach(child => {
+                child.parentDir = node;
                 const childWeight = Math.max(child.loc || 1, 1);
                 const childSector = (childWeight / dirLocTotal) * sectorAngle;
                 placeTreeSector(child, depth + 1, angleCursor, angleCursor + childSector);
