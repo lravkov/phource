@@ -76,13 +76,15 @@ let _bounceActive = false;
 let _bounceStartTime = 0;
 let _bounceTargetY = 0;
 let _bounceAmplitude = 0;
+let _lastBounceEndTime = 0; // tracks when last bounce completed for cooldown
 let _lastPredictY = null;
 // Pre-computed max directory depth for remaining commits (for zoom planning)
 // _maxDirDepthRemaining[i] = max dir depth across commits[i+1..end]
 let _maxDirDepthRemaining = [];
-const BOUNCE_DURATION = 500;  // ms — snappy
-const BOUNCE_THRESHOLD = 0.01; // 1% change in target distance to trigger bounce
+const BOUNCE_DURATION = 700;  // ms — slowed slightly for smoother feel
+const BOUNCE_THRESHOLD = 0.008; // 0.8% change in target distance to trigger bounce
 const BOUNCE_OVERSHOOT = 0.05; // 5% overshoot past target
+const BOUNCE_COOLDOWN = 500; // ms between bounce triggers to prevent clustering
 
 // Road (connection line) state — Ikeda: thin white wireframe lines
 let roadLines = [];
@@ -1466,7 +1468,7 @@ function predictCameraZoom() {
     // Trigger Disney bounce zoom when camera needs to make a significant jump
     // to reach the new target (compares target to current camera position,
     // not to previous target — catches accumulated growth over multiple commits)
-    if (!_bounceActive && camera) {
+    if (!_bounceActive && camera && (performance.now() - _lastBounceEndTime > BOUNCE_COOLDOWN)) {
         const effectiveTarget = Math.max(currentDistance, targetDistance);
         const camY = camera.position.y;
         const moveRatio = Math.abs(effectiveTarget - camY) / Math.max(camY, 1);
@@ -1475,6 +1477,7 @@ function predictCameraZoom() {
             _bounceStartTime = performance.now();
             _bounceTargetY = effectiveTarget;
             _bounceAmplitude = effectiveTarget * BOUNCE_OVERSHOOT;
+            _lastBounceEndTime = 0; // reset cooldown
         }
     }
 
@@ -1697,10 +1700,11 @@ function animate(timestamp) {
                     controls.target.set(0, 0, 0);
                     controls.update();
                     _bounceActive = false;
+                    _lastBounceEndTime = performance.now();
                     // Switch to normal lerp to fine-tune to latest target
                 } else {
-                    // Damped oscillation: ~2.5 bounces over 500ms, decaying
-                    const decay = Math.exp(-t * 5);
+                    // Damped oscillation: ~2.5 bounces over duration, decaying
+                    const decay = Math.exp(-t * 4);
                     const oscillation = Math.cos(t * Math.PI * 2.5);
                     const bounceY = _bounceTargetY + _bounceAmplitude * decay * oscillation;
                     camera.position.x = 0;

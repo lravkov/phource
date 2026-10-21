@@ -571,3 +571,24 @@
 |||    - File distribution: far=788, veryFar=11 — deep files at correct radius ✓
 |||    - Camera Z=0.02 (top-down) ✓
 |||    - 175 road lines, no crossing ✓
+- Added `radialDistribution` debug getter for node radial band analysis
+
+## Session 37 — Smoother Disney Bounce
+|||**Changes**:
+|||1. **Slower bounce**: `BOUNCE_DURATION` 500 → 700ms for less jerky feel
+|||2. **Earlier trigger**: `BOUNCE_THRESHOLD` 1% → 0.8% — catches smaller zoom changes sooner
+|||3. **Cooldown**: Added `BOUNCE_COOLDOWN = 500ms` — prevents bounce clustering when many small changes occur in quick succession (was triggering 8 times in previous test; now 4)
+|||4. **Slower decay**: `Math.exp(-t * 5)` → `Math.exp(-t * 4)` — smoother settling oscillation
+|||5. **Added `_lastBounceEndTime`** tracking + cooldown enforcement in `predictCameraZoom`
+|||6. Cache version bumped: v=56 → v=57
+|||
+|||**Verification**:
+|||    - 4 bounce sequences (down from 8 with 0.5% threshold) — less jerky ✓
+|||    - Each bounce: 450-500ms, 2 direction reversals (2 overshoots) ✓
+|||    - Bounce distribution: 69%, 81%, 96%, 98% — spread across animation ✓
+|||    - 0 JS errors ✓
+|||    - 0 overlaps (settled immediately at completion) ✓
+|||    - 1867/1867 commits ✓
+|||    - maxR=12800 (8 depths × 1600 ring spacing) ✓
+|||    - Camera Z=0.02 (top-down) ✓
+|||    - 175 road lines ✓
