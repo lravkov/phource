@@ -71,6 +71,16 @@ let frameCount = 0;
 let _timeSinceLastCommit = 0;
 let _cameraTargetY = null;  // null = no pending lerp target
 
+// === Disney bounce zoom state ===
+let _bounceActive = false;
+let _bounceStartTime = 0;
+let _bounceTargetY = 0;
+let _bounceAmplitude = 0;
+let _lastPredictY = null;
+const BOUNCE_DURATION = 500;  // ms — snappy
+const BOUNCE_THRESHOLD = 0.01; // 1% change in target distance to trigger bounce
+const BOUNCE_OVERSHOOT = 0.05; // 5% overshoot past target
+
 // Road (connection line) state — Ikeda: thin white wireframe lines
 let roadLines = [];
 const ROAD_COLOR = 0xffffff;
@@ -1440,6 +1450,23 @@ function predictCameraZoom() {
     const growthPadding = (remaining / total) * 0.4;  // up to 40% extra on first commit
     const targetDistance = maxFutureDistance * (1 + growthPadding);
 
+    // Trigger Disney bounce zoom when camera needs to make a significant jump
+    // to reach the new target (compares target to current camera position,
+    // not to previous target — catches accumulated growth over multiple commits)
+    if (!_bounceActive && camera) {
+        const effectiveTarget = Math.max(currentDistance, targetDistance);
+        const camY = camera.position.y;
+        const moveRatio = Math.abs(effectiveTarget - camY) / Math.max(camY, 1);
+        if (moveRatio > BOUNCE_THRESHOLD) {
+            _bounceActive = true;
+            _bounceStartTime = performance.now();
+            _bounceTargetY = effectiveTarget;
+            _bounceAmplitude = effectiveTarget * BOUNCE_OVERSHOOT;
+        }
+    }
+
+    _lastPredictY = targetDistance;
+
     _cameraTargetY = targetDistance;
     cameraNeedsAutoFit = true;
 }
@@ -1633,20 +1660,45 @@ function animate(timestamp) {
             const w = root ? (root.calculatedOuterWidth || 100) : 100;
             const d = root ? (root.calculatedOuterDepth || 100) : 100;
             const camDistance = Math.max(w, d) * 0.8;
-            // Top-down view with lerp zoom: camera directly above looking straight down
-            // Use predictive target if available, otherwise use current scene bounds
             const targetY = _cameraTargetY !== null ? _cameraTargetY : camDistance;
             const targetCamY = Math.max(camDistance, targetY);
-            // Continuous lerp every frame — don't clear flag, so camera
-            // smoothly follows predictive target updates between commits
-            const currentY = camera.position.y;
-            camera.position.x = 0;
-            camera.position.z = 0;
-            camera.position.y = currentY + (targetCamY - currentY) * 0.08;
-            controls.target.set(0, 0, 0);  // Look at tree center
-            controls.update();
+
+            if (_bounceActive) {
+                // Disney bounce zoom: damped oscillation toward target with 5% overshoot
+                const elapsed = performance.now() - _bounceStartTime;
+                const t = Math.min(elapsed / BOUNCE_DURATION, 1.0);
+                if (t >= 1.0) {
+                    // Bounce complete — settle at exact target
+                    camera.position.x = 0;
+                    camera.position.z = 0;
+                    camera.position.y = _bounceTargetY;
+                    controls.target.set(0, 0, 0);
+                    controls.update();
+                    _bounceActive = false;
+                    // Switch to normal lerp to fine-tune to latest target
+                } else {
+                    // Damped oscillation: ~2.5 bounces over 500ms, decaying
+                    const decay = Math.exp(-t * 5);
+                    const oscillation = Math.cos(t * Math.PI * 2.5);
+                    const bounceY = _bounceTargetY + _bounceAmplitude * decay * oscillation;
+                    camera.position.x = 0;
+                    camera.position.z = 0;
+                    camera.position.y = bounceY;
+                    controls.target.set(0, 0, 0);
+                    controls.update();
+                }
+            } else {
+                // Normal smooth lerp toward target
+                const currentY = camera.position.y;
+                camera.position.x = 0;
+                camera.position.z = 0;
+                camera.position.y = currentY + (targetCamY - currentY) * 0.08;
+                controls.target.set(0, 0, 0);
+                controls.update();
+            }
+
             // Clear flag only when simulation is paused/done and camera converged
-            if (simPaused) {
+            if (simPaused && !_bounceActive) {
                 if (Math.abs(camera.position.y - targetCamY) < targetCamY * 0.005) {
                     cameraNeedsAutoFit = false;
                 }
@@ -1683,6 +1735,7 @@ window.__phourceDebug = {
     get sceneChildren() { return scene ? scene.children.length : 0; },
     get roadLineCount() { return scene ? scene.children.filter(c => c.userData && c.userData.parent && c.userData.child).length : 0; },
     get cameraInfo() { return camera ? { x: camera.position.x, y: camera.position.y, z: camera.position.z } : null; },
+    get bounceState() { return { active: _bounceActive, targetY: _bounceTargetY, amplitude: _bounceAmplitude, startTime: _bounceStartTime, lastPredictY: _lastPredictY, cameraNeedsAutoFit }; },
     get sceneObjects() {
         if (!scene) return [];
         return scene.children.map(c => c.userData ? c.userData.type + ':' + (c.userData.nodeData ? c.userData.nodeData.name : c.userData.userName || '?') : c.type);

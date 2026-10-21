@@ -516,3 +516,20 @@
 |||    - 0 JS errors ✓
 |||    - 0 overlaps at 100% settlement ✓
 |||    - Camera Z=0.02 (top-down) ✓
+
+## Session 34 — Disney Bounce Zoom
+|||**Changes**:
+|||1. **Continuous lerp during simulation**: Removed threshold-based `cameraNeedsAutoFit` clearing — camera now lerps every frame toward the predictive target, stopping only when sim is paused and converged
+|||2. **Bounce trigger**: Changed from comparing consecutive targets (`_lastPredictY`) to comparing target distance vs. camera's current position — catches accumulated growth over multiple commits
+|||3. **Bounce threshold**: 1% (trigger when camera needs to move >1% of its current distance)
+|||4. **Overshoot**: 5% past target
+|||5. **Oscillation**: Damped cosine (exp(-t*5) * cos(t*PI*2.5)) — ~2 bounces over 500ms
+|||6. **Bounce only triggers on significant zoom changes** — small gradual movements use normal lerp
+|||
+|||**Verification**:
+|||    - Bounce 1 (69% commits): 19071->19152->18752->18656->18741->18807->18827->18816 — 2 overshoot oscillations
+|||    - Bounce 2 (81% commits): 19542->19580->19126->19128->19212->19262->19269->19258 — 2 overshoot oscillations
+|||    - 16/400 frames with bounce active, 8 direction reversals
+|||    - 0 JS errors
+|||    - 0 overlaps
+|||    - 94.7% pure black, 0% colored pixels (beams only)
