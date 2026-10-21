@@ -695,7 +695,7 @@
 ## Session 43 — Mouse control remapping
 
 **Change**: Swapped OrbitControls mouse button mappings in `public/phource.js` (after line 1372):
-- LEFT click + drag: now **pan** (was orbit/rotate)
+|- LEFT click + drag: now **pan** (was orbit/rotate)
 - RIGHT click + drag: now **orbit/rotate** (was pan)
 - MIDDLE click + drag: **pan** (unchanged)
 - Added `contextmenu` preventer on canvas to suppress browser context menu on right-click (now used for orbit)
@@ -705,3 +705,11 @@
 - 0 JS errors
 - Scrub to 70%: 0.18s, 0 overlaps
 - Cache version: v=68 → v=69
+
+## Session 44 — Directory hover tooltips with proximity fallback
+
+**Change**: Fixed directory tooltip to reliably trigger on mouseover in `public/phource.js` `updateTooltip()`:
+- Directory spheres have tiny screen-space radius (~0.0005 NDC vs ~0.0008 NDC per pixel), making raycast hits unreliable at sub-pixel offsets
+- Added proximity fallback: when primary raycast finds no meaningful hit, projects all directory sphere positions to NDC and checks if mouse is within 0.02 NDC (~12px) of any projected center
+- Also fixed raycast iteration to skip invisible file instances in the InstancedMesh (previously `intersects[0]` could be an invisible instance at origin)
+- Tooltip displays: directory name, full path, total LOC, total commit count

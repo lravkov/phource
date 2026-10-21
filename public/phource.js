@@ -1297,44 +1297,68 @@ function updateTooltip() {
     if (!raycaster || !mouse || !camera || !tooltipElement) return;
     raycaster.setFromCamera(mouse, camera);
     const intersects = raycaster.intersectObjects(pickableObjects, false);
-    if (intersects.length > 0) {
-        const hit = intersects[0];
-        const instanceId = hit.instanceId;
-        let nodeData = null;
-        let type = null;
-        if (instanceId !== undefined && fileInstanceNodes[instanceId]) {
-            nodeData = fileInstanceNodes[instanceId];
-            type = 'File';
-        } else if (hit.object && hit.object.userData) {
+    let nodeData = null;
+    let type = null;
+    // Try direct raycast hit — skip invisible InstancedMesh instances
+    for (let i = 0; i < intersects.length; i++) {
+        const hit = intersects[i];
+        if (hit.instanceId !== undefined) {
+            if (fileInstanceNodes[hit.instanceId]) {
+                nodeData = fileInstanceNodes[hit.instanceId];
+                type = 'File';
+                break;
+            }
+        } else if (hit.object && hit.object.userData && hit.object.userData.nodeData) {
             nodeData = hit.object.userData.nodeData;
             type = hit.object.userData.type;
+            break;
         }
-        if (nodeData !== intersectedObject) {
-            intersectedObject = nodeData;
-            const data = nodeData;
-            if (data) {
-                const fullPath = data.fullPath || data.name || 'N/A';
-                let html = `<strong>${data.name || 'Unnamed'}</strong><ul>`;
-                html += `<li>${fullPath === '(root)' ? '/ (Project Root)' : fullPath}</li>`;
-                if (type === 'File') {
-                    html += `<li>${data.loc} lines of code</li>`;
-                    html += `<li>${data.count} commits</li>`;
-                    html += `<li>Heat: ${(data.heat || 0).toFixed(2)}</li>`;
+    }
+    // Fallback: proximity check for directory spheres (too small to reliably raycast at distance)
+    if (!nodeData && pickableObjects.length > 0) {
+        const PROXIMITY_THRESHOLD = 0.02; // ~12px at 600px width, ~25px at 1280px
+        let closest = null;
+        let closestDist = Infinity;
+        for (let i = 0; i < pickableObjects.length; i++) {
+            const obj = pickableObjects[i];
+            if (obj.userData && obj.userData.type === 'Directory' && obj.userData.nodeData) {
+                const pos = obj.position.clone();
+                pos.y = obj.scale.y * 0.5;
+                const ndc = pos.clone().project(camera);
+                const dist = Math.sqrt(
+                    Math.pow(ndc.x - mouse.x, 2) + Math.pow(ndc.y - mouse.y, 2)
+                );
+                if (dist < PROXIMITY_THRESHOLD && dist < closestDist) {
+                    closestDist = dist;
+                    closest = obj;
                 }
-                if (type === 'Directory') {
-                    html += `<li>${data.loc} total LOC</li>`;
-                    html += `<li>${data.count} total commits</li>`;
-                }
-                html += `</ul>`;
-                tooltipElement.style.display = 'block';
-                tooltipElement.innerHTML = html;
-            } else {
-                tooltipElement.style.display = 'none';
-                intersectedObject = null;
             }
         }
-    } else {
-        if (intersectedObject !== null) {
+        if (closest) {
+            nodeData = closest.userData.nodeData;
+            type = 'Directory';
+        }
+    }
+    if (nodeData !== intersectedObject) {
+        intersectedObject = nodeData;
+        const data = nodeData;
+        if (data) {
+            const fullPath = data.fullPath || data.name || 'N/A';
+            let html = `<strong>${data.name || 'Unnamed'}</strong><ul>`;
+            html += `<li>${fullPath === '(root)' ? '/ (Project Root)' : fullPath}</li>`;
+            if (type === 'File') {
+                html += `<li>${data.loc} lines of code</li>`;
+                html += `<li>${data.count} commits</li>`;
+                html += `<li>Heat: ${(data.heat || 0).toFixed(2)}</li>`;
+            }
+            if (type === 'Directory') {
+                html += `<li>${data.loc} total LOC</li>`;
+                html += `<li>${data.count} total commits</li>`;
+            }
+            html += `</ul>`;
+            tooltipElement.style.display = 'block';
+            tooltipElement.innerHTML = html;
+        } else {
             tooltipElement.style.display = 'none';
             intersectedObject = null;
         }
