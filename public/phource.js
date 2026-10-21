@@ -1113,8 +1113,12 @@ function updateUserAvatars(dt) {
                     break;  // Actions are in order; stop at next batch
                 }
             }
+            // Average of all file positions in this batch, pulled toward the
+            // root/center so the committor stays within the central region
+            // of the tree instead of flying to the outer edges.
             const avgPos = new THREE.Vector3(0, USER_HEIGHT, 0);
-            let count = 0;
+            let count = 1;  // Start at 1 to include root anchor
+            // Root/center anchor (at origin, USER_HEIGHT above ground)
             for (const fileNode of batchFiles) {
                 if (fileNode && fileNode.targetPos) {
                     const fileHeight = fileNode.buildingHeight || 0;
@@ -2121,6 +2125,11 @@ window.__phourceDebug = {
         return overlaps;
     },
     get cameraPos() { return camera ? Array.from(camera.position) : null; },
+    get userPos() {
+        if (!users || users.size === 0) return null;
+        const u = users.values().next().value;
+        return u ? [Math.round(u.pos.x), Math.round(u.pos.y), Math.round(u.pos.z)] : null;
+    },
     get controlTarget() { return controls ? Array.from(controls.target) : null; },
     get simState() { return { simStarted, simTime, commitIndex, fileMapSize: fileMap.size, usersSize: users.size, beamCount: beamActions.length, maxCommitCount, dtSum, frameCount, isScrubbing, simPaused, minTs: minTimestamp, maxTs: maxTimestamp }; },
     get rootDims() { return root ? { w: root.calculatedOuterWidth, d: root.calculatedOuterDepth } : null; },
