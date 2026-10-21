@@ -827,3 +827,38 @@ jittery movement when a commit touches many files across the tree.
 - Sim completed 1867/1867, 0 JS errors, 0 overlaps at scrub 10%/50%/90%
 - Same-file beam offset dedup still working (0 incidents)
 - Cache version bumped to v=100
+
+## Session 49 — User position corruption fix + triangle size + file pull
+
+**Problem**: User position was going off-screen completely. User reported "still
+moving 203 units/frame instead of expected ~6 units/frame" — user started at
+(0, 8, 0) but was already at (-103, 175) at frame 1 with dt=0.
+
+**Root cause**: In `updateBeamActions` (phource.js), `const userPos = ba.user.pos`
+created a REFERENCE to the user's `THREE.Vector3` position. The lateral beam-offset
+code (`points[j].x += ba.beamOffset.x`) then mutated this reference in-place.
+With 818+ beams each adding their offset to the user's position every frame, the
+committor accumulated offsets summing to thousands of units, launching it off-screen.
+
+**Fix** (`public/phource.js`):
+1. `updateBeamActions`: Changed `const userPos = ba.user.pos` to
+ `const userPos = ba.user.pos.clone()` — beam offsets now mutate a copy,
+ not the live user position
+2. `createUser`: Increased triangle size from r=12*GS (3.6) to r=45*GS (13.5)
+3. `updateUserAvatars`: Changed from 50% midpoint to FILE_PULL=0.75 (75% toward
+ files, 25% toward center)
+4. Cache bumped to v=107
+
+**Further adjustments**:
+5. Triangle size: r=45 -> r=90, h=60 (300*0.3, 200*0.3) — "still way too small"
+6. USER_SPEED: 60 -> 300 (5x faster movement toward targets)
+7. FILE_PULL: 0.75 -> 0.95 (95% toward files, 5% toward center)
+8. MAX_BATCH_FILES=15: Limit batch averaging to 15 most recent files so target
+ migrates toward where user is actively touching files, not the center-of-mass
+ of a giant init batch (850+ files at same timestamp)
+9. Cache bumped to v=110
+
+**Verification**:
+- 1875/1875 commits, 0 JS errors, 0 overlaps at scrub 0/25/50/75/100%
+- User position dynamically follows file clusters (6000-8200 range, not stuck at center)
+- Triangle 25x original size (r=3.6 -> r=90), clearly visible on 20000-unit tree
