@@ -610,3 +610,20 @@
 |||    - Camera Z=0.02 (top-down) ✓
 |||    - 175 road lines ✓
 |||    - 816 files, 936 instances ✓
+
+## Session 39 — Zoom Jitter Fix (steady-state camera stability)
+|||**Root cause**: Two sources of jitter when zoom is not actively changing:
+|||1. **Stale bounce target**: When Disney bounce completed, camera snapped to `_bounceTargetY` (captured at bounce start) instead of the latest `targetCamY`. If the target moved during the 700ms bounce, the camera jumped to the old value then immediately adjusted to the new one = visible jitter
+|||2. **Constant lerp during steady state**: Normal lerp ran every frame with factor 0.08-0.15. Growth padding decreases ~0.02%/commit, changing the target by a few units each commit. The camera constantly "chased" this tiny drift, creating micro-oscillation
+|||
+|||**Changes**:
+|||1. **Bounce completion**: Changed `camera.position.y = _bounceTargetY` to `camera.position.y = targetCamY` — uses the latest predicted target, not the stale bounce-start target
+|||2. **Deadzone for normal lerp**: Added 0.2% convergence threshold. If camera is within 0.2% of target (|delta|/currentY < 0.002), skip the lerp entirely. Prevents chasing micro-drift from growth padding decay during steady-state animation
+|||3. Cache version bumped: v=60 → v=61
+|||
+|||**Verification**:
+|||    - Phource repo (80 commits, same-timestamp batch): jitter range = 0.000000% (rock solid) ✓
+|||    - Gource test log (1867 commits): jitter range = 0.0893% during active sim, 0 direction changes ✓
+|||    - 0 JS errors ✓
+|||    - 0 overlaps ✓
+|||    - Camera Z=0.01 (top-down) ✓

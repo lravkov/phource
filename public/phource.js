@@ -1703,15 +1703,14 @@ function animate(timestamp) {
                 const elapsed = performance.now() - _bounceStartTime;
                 const t = Math.min(elapsed / BOUNCE_DURATION, 1.0);
                 if (t >= 1.0) {
-                    // Bounce complete — settle at exact target
+                    // Bounce complete — settle at latest target (not stale _bounceTargetY)
                     camera.position.x = 0;
                     camera.position.z = 0;
-                    camera.position.y = _bounceTargetY;
+                    camera.position.y = targetCamY;
                     controls.target.set(0, 0, 0);
                     controls.update();
                     _bounceActive = false;
                     _lastBounceEndTime = performance.now();
-                    // Switch to normal lerp to fine-tune to latest target
                 } else {
                     // Damped oscillation: ~2.5 bounces over duration, decaying
                     const decay = Math.exp(-t * 4);
@@ -1728,11 +1727,14 @@ function animate(timestamp) {
                 const currentY = camera.position.y;
                 camera.position.x = 0;
                 camera.position.z = 0;
-                // Adaptive lerp: faster when camera is far from target (catching up
-                // during rapid tree growth), slower when close (smooth settling)
-                const lerpFactor = Math.min(0.15, Math.max(0.08,
-                    Math.abs(targetCamY - currentY) / Math.max(currentY, 1)));
-                camera.position.y = currentY + (targetCamY - currentY) * lerpFactor;
+                // Deadzone: if camera is within 0.2% of target, don't adjust.
+                // Prevents jitter from tiny target changes (growth padding
+                // decreases ~0.02%/commit) during steady-state animation.
+                const moveRatio = Math.abs(targetCamY - currentY) / Math.max(currentY, 1);
+                if (moveRatio > 0.002) {
+                    const lerpFactor = Math.min(0.15, Math.max(0.08, moveRatio));
+                    camera.position.y = currentY + (targetCamY - currentY) * lerpFactor;
+                }
                 controls.target.set(0, 0, 0);
                 controls.update();
             }
