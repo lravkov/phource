@@ -730,3 +730,29 @@
 - Directory used when within 30px and raycast found nothing
 - Switched to screen-space pixel distance (30px) for consistent forgiveness zone
 - Used `getWorldPosition()` for exact mesh projection
+
+## Session 46 — Beam lateral offsets for same-path visibility
+
+**Problem**: When multiple add/change/delete beams travel along the same tree path, additive blending produces a white blob — individual colors are lost.
+
+**Implementation in `public/phource.js`**:
+
+### Initial approach — global beam counter
+First attempt used a global `_beamCounter` incrementing per beam, with offset based on angle + magnitude. Works but resets per file — same file's repeated beams got the same offset.
+
+### Refined approach — per-file offset grouping + hash-based direction
+1. `_beamOffsetMap` Map keyed by `fileNode.fullPath` — tracks per-file beam counter via `offsetIdx`
+2. Hash file path with DJB2 (`hash = ((hash << 5) - hash + charCode) | 0`) for stable base angle — deterministic, frame-independent
+3. Initial cycling: `offsetAngle = baseAngle + offsetIdx * (PI/6)` across 6 directions × 4 magnitudes
+   - **Bug found**: td_prime_cache.json modified 61 times — 6/4 = 12-cycle repeated every 12 mods → offsets collided for same file
+4. **Final fix**: 12 directions (PI/6 = 30° steps) + expanding rings (`mag = 2 + ringIdx * 1.5`)
+   - Gives 72 unique offsets per file (12 dirs × 6 rings), eliminates all same-file collisions for up to 71 modifications
+
+### Verification (1875-commit tnom-bot log)
+- Max concurrent beams: 793 simultaneously active
+- Same-file duplicate offset incidents: **0** (e.g. renewal-checklist-generator-master-v2.py with 3 concurrent beams had offsets [2,0,7], [-6,0,6], [-3,0,-1])
+- 0 JS errors, 0 node overlaps, sim completed 1875/1875 commits
+- Cross-file collisions (same offset for different files) are not a visibility issue — different files travel different tree paths
+
+### Other changes this session
+- Cache version bumped v=94 → v=95

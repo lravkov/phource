@@ -53,6 +53,7 @@ let root = null;
 let fileMap = new Map();
 const users = new Map();
 const beamActions = [];
+const _beamOffsetMap = new Map();  // fullPath -> offset index (per-file grouping)
 
 // File sphere tracking (InstancedMesh for performance: 1 draw call for all files)
 let fileInstancedMesh = null;
@@ -1151,10 +1152,36 @@ function createBeamAction(userNode, fileNode, actionType) {
         if (pathNodes.length === 0) pathNodes = null;
     }
 
+    // Compute lateral offset perpendicular to beam direction so overlapping
+    // beams on the same tree path don't blend into a white blob.
+    // Group by file path so all beams to the same file get distinct offsets.
+    // Hash the file path to determine offset direction (stable, frame-independent).
+    const offsetKey = fileNode.fullPath || fileNode.name;
+    const offsetIdx = (_beamOffsetMap.get(offsetKey) || 0);
+    _beamOffsetMap.set(offsetKey, offsetIdx + 1);
+    // Hash file path for base offset direction (stable, frame-independent).
+    let hash = 0;
+    for (let hi = 0; hi < offsetKey.length; hi++) {
+        hash = ((hash << 5) - hash + offsetKey.charCodeAt(hi)) | 0;
+    }
+    const baseAngle = (hash / 0x10000000) * Math.PI * 2;
+    // Cycle through 12 distinct directions (30° apart) + expanding rings
+    // so repeated modifications of the same file (up to 60+ times) get unique offsets.
+    // Ring 0: 12 dirs at radius 2, Ring 1: 12 dirs at 3.5, Ring 2: 12 dirs at 5, etc.
+    const dirFromIdx = offsetIdx % 12;
+    const ringIdx = Math.floor(offsetIdx / 12);
+    const offsetAngle = baseAngle + (dirFromIdx * Math.PI / 6);
+    const mag = 2 + ringIdx * 1.5;
+    const beamOffset = new THREE.Vector3(
+        Math.cos(offsetAngle) * mag,
+        0,
+        Math.sin(offsetAngle) * mag
+    );
+
     beamActions.push({
         user: userNode, file: fileNode, beam, glowSphere,
         progress: 0, duration: BEAM_DURATION, actionType,
-        pathNodes: pathNodes,
+        pathNodes: pathNodes, beamOffset: beamOffset,
     });
 }
 
@@ -1216,6 +1243,14 @@ function updateBeamActions(dt) {
             points = [userPos, filePos];
         }
 
+        // Apply lateral offset to separate overlapping beams on the same path
+        if (ba.beamOffset && (ba.beamOffset.x !== 0 || ba.beamOffset.z !== 0)) {
+            for (let j = 0; j < points.length; j++) {
+                points[j].x += ba.beamOffset.x;
+                points[j].z += ba.beamOffset.z;
+            }
+        }
+
         ba.beam.geometry.dispose();
         ba.beam.geometry = new THREE.BufferGeometry().setFromPoints(points);
 
@@ -1230,12 +1265,16 @@ function updateBeamActions(dt) {
         ba.beam.material.opacity = opacity;
         ba.beam.material.needsUpdate = true;
 
-        // Update glow sphere at file endpoint
+        // Update glow sphere at file endpoint (offset to match beam)
         if (ba.glowSphere) {
             const fileHeight = Math.max(ba.file.buildingHeight || 0, 0.1);
-            ba.glowSphere.position.set(
-                ba.file.targetPos.x, fileHeight / 2, ba.file.targetPos.z
-            );
+            let gx = ba.file.targetPos.x;
+            let gz = ba.file.targetPos.z;
+            if (ba.beamOffset && (ba.beamOffset.x !== 0 || ba.beamOffset.z !== 0)) {
+                gx += ba.beamOffset.x;
+                gz += ba.beamOffset.z;
+            }
+            ba.glowSphere.position.set(gx, fileHeight / 2, gz);
             // Pulse glow sphere during propagation, then fade
             let glowScale = 1;
             if (ba.progress < propThreshold) {
@@ -2071,6 +2110,31 @@ window.__phourceDebug = {
     settle: function() {
         settleCompleteLayout();
         return true;
+    },
+    beamDebug: function() {
+        var result = { total: beamActions.length, beams: [] };
+        for (var i = 0; i < Math.min(10, beamActions.length); i++) {
+            var ba = beamActions[i];
+            var info = {
+                progress: Math.round(ba.progress * 100) / 100,
+                actionType: ba.actionType,
+                fileName: ba.file.name,
+                hasPathNodes: !!ba.pathNodes,
+                pathNodeCount: ba.pathNodes ? ba.pathNodes.length : 0,
+                hasGlowSphere: !!ba.glowSphere,
+                beamOffset: ba.beamOffset ? [Math.round(ba.beamOffset.x), Math.round(ba.beamOffset.y), Math.round(ba.beamOffset.z)] : null,
+                beamIdx: ba.beamIdx !== undefined ? ba.beamIdx : 'N/A',
+            };
+            result.beams.push(info);
+        }
+        // Count action types
+        var typeCounts = {};
+        for (var i = 0; i < beamActions.length; i++) {
+            var t = beamActions[i].actionType;
+            typeCounts[t] = (typeCounts[t] || 0) + 1;
+        }
+        result.typeCounts = typeCounts;
+        return JSON.stringify(result);
     },
     get overlapDebug() {
         if (!root || !forceLayoutNodes || forceLayoutNodes.length < 2) return { nodes: 0 };
