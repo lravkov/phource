@@ -667,3 +667,27 @@
 |||    - 0 JS errors ✓
 |||    - 0 overlaps ✓
 |||    - All 4 re-added files properly positioned ✓
+
+## Session 42 — Scrubbing performance optimization
+
+**Problem**: Clicking on the scrubber caused ~2.0s delay before the tree updated — should be essentially instantaneous for proper scrubing.
+
+**Root causes identified**:
+1. `settleCompleteLayout()` ran 500 synchronous `resolveOverlaps()` passes (300 + 200), each building a spatial grid over ~992 nodes (816 files + 175 dirs + root) with 5 inner passes — ~2.5M operations total, fully blocking.
+2. `processCommit` was called for all commits from 0 to target during `resetToTime`, creating `THREE.Line` + `LineBasicMaterial` + `BufferGeometry` beam actions for every non-delete commit (~1285 objects for 1867-commit log).
+3. `isScrubbing` was not set inside `resetToTime` itself — the scrubber 'input' handler set it, but the debug `scrubToFraction` did not, so beams were still created during debug scrubbing.
+4. `cleanupScene()` + `initFileInstancedMesh()` + `createRoadLines()` recreated all WebGL resources synchronously.
+
+**Fixes applied**:
+1. **`settleCompleteLayout` → async + reduced passes**: Reduced from 500 to 30 passes (10 sync + 20 async). Initial 10 runs synchronously for immediate layout quality; remaining 20 run in chunks of 10 via `setTimeout(_settleChunkAsync, 0)` to keep UI responsive. The orbital layout from `calculateOrbitalLayout` + 10 `resolveOverlaps` in `rebuildLayout` already produces 0 overlaps — additional passes just refine.
+2. **Skip beam creation during scrubbing**: Added `isScrubbing = true` at the start of `resetToTime` (before commit processing loop) and `isScrubbing = false` after setup. `processCommit` already had `if (!isScrubbing)` guards on `createBeamAction` and `userNode.actions.push`. With `isScrubbing` properly set inside `resetToTime`, beam creation is reliably skipped during all scrub-triggered rebuilds.
+
+**Verification** (1867-commit tnom-bot log):
+- Scrub to 50%: 0.18s (was ~2.0s, **11x faster**)
+- Scrub to 90%: 0.22s
+- Scrub to 10%: 0.18s
+- Beams during scrub: 0 (was 1285)
+- Beams during playback: created correctly (4+ after 3s of normal play)
+- Overlaps: 0 at all scrub positions, 0 after async settling
+- JS errors: 0
+- Cache version: v=67 → v=68

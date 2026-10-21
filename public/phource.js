@@ -714,21 +714,45 @@ function stepOrbitalSimulation(dt) {
     if (forceFrameCount % 30 === 0) resolveOverlaps();
 }
 
-// Synchronous chunked settling — runs as a one-shot block when the sim
-// auto-pauses or after scrubbing. Depth-layered rings provide the base
-// layout; resolveOverlaps pushes overlapping nodes apart without distorting
-// the concentric ring structure.  No stepForceLayout (that's what caused
-// tangling in Idea 2).
-function settleCompleteLayout() {
+// Async chunked settling — runs initial 10 passes synchronously (layout is
+// already good from calculateOrbitalLayout + 10 resolveOverlaps in rebuildLayout),
+// then remaining passes in async chunks via setTimeout(0) to keep UI responsive.
+// Total passes reduced from 500 to 30 for near-instant scrub response.
+const SETTLE_TOTAL_PASSES = 30;
+const SETTLE_SYNC_PASSES = 10;
+const SETTLE_CHUNK_SIZE = 10;
+let _settleRemaining = 0;
+
+async function settleCompleteLayout() {
     if (!root) return;
     forceSimRunning = true;
     forceCooling = 1.0;
-    for (let i = 0; i < 300; i++) resolveOverlaps();
-    for (let i = 0; i < 200; i++) resolveOverlaps();
-    forceCooling = 0.0;
-    if (root) root.targetPos.set(0, 0, 0);
-    forceSimRunning = false;
-    console.log('Layout settled. Overlaps:', window.__phourceDebug.overlapCount);
+    // Run initial passes synchronously for immediate layout quality
+    for (let i = 0; i < SETTLE_SYNC_PASSES; i++) resolveOverlaps();
+    // Remaining passes async to avoid blocking the main thread
+    _settleRemaining = SETTLE_TOTAL_PASSES - SETTLE_SYNC_PASSES;
+    if (_settleRemaining > 0) {
+        _settleChunkAsync();
+    } else {
+        forceCooling = 0.0;
+        if (root) root.targetPos.set(0, 0, 0);
+        forceSimRunning = false;
+        console.log('Layout settled. Overlaps:', window.__phourceDebug.overlapCount);
+    }
+}
+
+function _settleChunkAsync() {
+    const passes = Math.min(SETTLE_CHUNK_SIZE, _settleRemaining);
+    for (let i = 0; i < passes; i++) resolveOverlaps();
+    _settleRemaining -= passes;
+    if (_settleRemaining > 0) {
+        setTimeout(_settleChunkAsync, 0);
+    } else {
+        forceCooling = 0.0;
+        if (root) root.targetPos.set(0, 0, 0);
+        forceSimRunning = false;
+        console.log('Layout settled. Overlaps:', window.__phourceDebug.overlapCount);
+    }
 }
 
 function rebuildLayout() {
@@ -1189,7 +1213,7 @@ function processCommit(entry) {
     } else if (entry.action === 'D') {
         fileNode = fileMap.get(entry.filepath);
         if (fileNode) {
-            createBeamAction(userNode, fileNode, 'D');
+            if (!isScrubbing) createBeamAction(userNode, fileNode, 'D');
             fileNode.targetAlpha = 0;
             fileNode.fadingOut = true;
             fileNode.pendingRemoval = true;
@@ -1200,8 +1224,10 @@ function processCommit(entry) {
     }
 
     if (fileNode && entry.action !== 'D') {
-        userNode.actions.push({ fileNode, actionType: entry.action });
-        createBeamAction(userNode, fileNode, entry.action);
+        if (!isScrubbing) {
+            userNode.actions.push({ fileNode, actionType: entry.action });
+            createBeamAction(userNode, fileNode, entry.action);
+        }
     }
     userNode.lastActionTime = simTime;
 }
@@ -1612,6 +1638,7 @@ function resetToTime(targetTimestamp) {
     // Set simulation time to scrubbed position
     simTime = targetTimestamp;
     commitIndex = 0;
+    isScrubbing = true;  // Skip beam creation + sim updates during rebuild
 
     // Re-process all commits up to target timestamp
     while (commitIndex < logEntries.length &&
@@ -1626,6 +1653,7 @@ function resetToTime(targetTimestamp) {
     positionCamera();
     simStarted = true;
     simPaused = true;
+    isScrubbing = false;  // Allow animation loop to resume (paused)
     // Async physics settling to find natural tree shape after scrub
     settleCompleteLayout();
     updatePlayPauseButton();
