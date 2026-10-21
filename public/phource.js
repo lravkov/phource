@@ -165,10 +165,11 @@ function createDirNode(name, fullPath, depth) {
     };
 }
 
-function createFileNode(name, fullPath, loc, count, colourHex, depth) {
+function createFileNode(name, fullPath, loc, count, colourHex, depth, actionType) {
     const dims = calculateFileDimensions(loc, count);
     return {
         name, fullPath, loc, count, colourHex: colourHex || '',
+        actionType: actionType || 'A',
         isDirectory: false, depth, heat: 0,
         buildingWidth: dims.width, buildingDepth: dims.depth, buildingHeight: dims.height,
         mesh: null,
@@ -216,7 +217,7 @@ function getNodeByPath(filepath) {
     return currentDir;
 }
 
-function addFileToTree(filepath, loc, count, colourHex) {
+function addFileToTree(filepath, loc, count, colourHex, actionType) {
     const parts = filepath.split('/');
     const fileName = parts.pop();
     if (!fileName) return null;
@@ -226,8 +227,9 @@ function addFileToTree(filepath, loc, count, colourHex) {
         fileNode.loc = loc;
         fileNode.count = count;
         fileNode.colourHex = colourHex || '';
+        if (actionType) fileNode.actionType = actionType;
     } else {
-        fileNode = createFileNode(fileName, filepath, loc, count, colourHex, parentDir.depth + 1);
+        fileNode = createFileNode(fileName, filepath, loc, count, colourHex, parentDir.depth + 1, actionType);
         parentDir.childFiles.push(fileNode);
         fileNode.parentDir = parentDir;
         // Don't set treeDirty for new files — they join the simulation directly
@@ -765,8 +767,9 @@ function addFileInstance(fileNode) {
     fileNode.fadingOut = false;
     fileNode.pendingRemoval = false;
 
-    // Ikeda: pure white — data magnitude encoded in size, not color
-    fileInstancedMesh.setColorAt(id, new THREE.Color(0xffffff));
+    // Color file by its action type (A=green, M=purple, D=red)
+    const actionColour = ACTION_COLOURS[fileNode.actionType] || new THREE.Color(0xffffff);
+    fileInstancedMesh.setColorAt(id, actionColour);
     fileInstancedMesh.instanceColor.needsUpdate = true;
 
     fileNode.mesh = fileInstancedMesh; // Reference to the InstancedMesh
@@ -787,8 +790,9 @@ function updateFileMesh(fileNode, dt) {
     fileInstancedMesh.setMatrixAt(id, matrix);
     fileInstancedMesh.instanceMatrix.needsUpdate = true;
 
-    // Ikeda: color is static white — no per-frame color updates needed
-    fileInstancedMesh.setColorAt(id, new THREE.Color(0xffffff));
+    // Color file by action type (set once, but ensure per-frame consistency)
+    const actionColour = ACTION_COLOURS[fileNode.actionType] || new THREE.Color(0xffffff);
+    fileInstancedMesh.setColorAt(id, actionColour);
     fileInstancedMesh.instanceColor.needsUpdate = true;
 
     if (fileNode.pendingRemoval && fileNode.currentAlpha < 0.02) {
@@ -944,11 +948,11 @@ function updateRoadLines() {
 
 // === User management ===
 
-// Ikeda aesthetic: all action beams are pure white
+// Action type colours: distinguish add/mod/modify actions visually
 const ACTION_COLOURS = {
-    A: new THREE.Color(0xffffff),
-    M: new THREE.Color(0xffffff),
-    D: new THREE.Color(0xffffff),
+    A: new THREE.Color(0x44ff44),  // Added   — green (new growth)
+    M: new THREE.Color(0xaa44ff),  // Modified — purple (change)
+    D: new THREE.Color(0xff4444),  // Deleted  — red (removal)
 };
 
 function createUser(name) {
@@ -1111,21 +1115,28 @@ function processCommit(entry) {
 
     let fileNode = null;
     if (entry.action === 'A') {
-        fileNode = addFileToTree(entry.filepath, entry.loc, entry.count, entry.colour);
+        fileNode = addFileToTree(entry.filepath, entry.loc, entry.count, entry.colour, 'A');
     } else if (entry.action === 'M') {
         fileNode = fileMap.get(entry.filepath);
         if (fileNode) {
             fileNode.loc = entry.loc;
             fileNode.count = entry.count;
             fileNode.colourHex = entry.colour || '';
+            fileNode.actionType = 'M';
             const dims = calculateFileDimensions(entry.loc, entry.count);
             fileNode.buildingWidth = dims.width;
             fileNode.buildingDepth = dims.depth;
             fileNode.buildingHeight = dims.height;
             fileNode.forceSize = Math.min(Math.max(dims.width, dims.depth), 100);
             // No treeDirty — forceSize updated directly, simulation handles it
+            // Update file instance color to reflect modification
+            if (fileNode.instanceId !== undefined && fileInstancedMesh) {
+                const colour = ACTION_COLOURS['M'];
+                fileInstancedMesh.setColorAt(fileNode.instanceId, colour);
+                fileInstancedMesh.instanceColor.needsUpdate = true;
+            }
         } else {
-            fileNode = addFileToTree(entry.filepath, entry.loc, entry.count, entry.colour);
+            fileNode = addFileToTree(entry.filepath, entry.loc, entry.count, entry.colour, 'M');
         }
     } else if (entry.action === 'D') {
         fileNode = fileMap.get(entry.filepath);

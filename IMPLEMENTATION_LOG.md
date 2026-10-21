@@ -458,7 +458,7 @@
 |||    - 983 nodes, 0 overlapping, 0 maxOverlap ✓
 |||    - 166 road lines ✓
 ||||    - Ikeda styling: 0% colored, 94.5% pure black ✓
-||||    - 0 JS errors ✓
+|||    - 0 JS errors ✓
 
 ## Session 31 — SECONDS_PER_COMMIT Tweak to 0.5
 |||**Change**: Reduced SECONDS_PER_COMMIT from 3.0 to 0.5. At 3.0 the full animation took ~12+ minutes (too slow). At 0.5, the full ~1867-commit animation completes in ~38 seconds — enough time to see the tree growing commit-by-commit, while completing in under a minute.
@@ -468,4 +468,24 @@
 |||    - Commit pacing: 80.7% reached at 24s, ~38s estimated total ✓
 |||    - Camera zoom lerps smoothly: 18637→19452 ✓
 |||    - 0 overlaps, 0% colored, 93.1% pure black ✓
+|||    - 0 JS errors ✓
+
+## Session 32 — Action-Type Colors
+|||**Changes**:
+|||1. **ACTION_COLOURS**: Updated from all-white to distinct colors per commit type:
+|||    - `A` (Added): Green (0x44ff44) — new growth
+|||    - `M` (Modified): Purple (0xaa44ff) — change
+|||    - `D` (Deleted): Red (0xff4444) — removal
+|||2. **`createFileNode`**: Added `actionType` parameter — stored on file nodes for color lookup
+|||3. **`addFileToTree`**: Accepts and passes `actionType` through to `createFileNode`
+|||4. **`addFileInstance`**: Sets instance color from `ACTION_COLOURS[fileNode.actionType]` instead of always white
+|||5. **`updateFileInstance`** (per-frame): Uses `ACTION_COLOURS[fileNode.actionType]` instead of white
+|||6. **`processCommit`**: Passes action type to `addFileToTree`, updates file color on modify
+|||7. **`getNodeByPath`**: Added lookup function for predictive camera zoom
+|||
+|||**Verification**:
+|||    - File colors: Green (Added) 421px, Purple (Modified) 5371px, Red (Deleted) 0px ✓
+|||    - 0 overlaps at 100% settlement ✓
+|||    - 94.7% pure black, 0.2% colored ✓
+|||    - Top-down camera: Z=0.02 ✓
 |||    - 0 JS errors ✓
