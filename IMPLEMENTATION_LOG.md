@@ -533,3 +533,22 @@
 |||    - 0 JS errors
 |||    - 0 overlaps
 |||    - 94.7% pure black, 0% colored pixels (beams only)
+
+## Session 35 — Blue Add Beams + All-Files-Visible Zoom
+|||**Changes**:
+|||1. **Add beam color**: Changed `A` (Added) from green (0x44ff44) to blue (0x4488ff) — beams are blue, files remain pure white
+|||2. **Future depth pre-computation**: Added `_maxDirDepthRemaining` array, computed during init by scanning all log entries backwards. `_maxDirDepthRemaining[i]` gives the maximum directory depth across commits[i+1..end]
+|||3. **Predictive zoom with future depth**: `predictCameraZoom` now uses `futureMaxRadius = maxDepth * ORBIT_DIR_RADIUS` to ensure the camera always zooms out enough for the deepest future directory — prevents files going off-screen on large repos
+|||4. **Adaptive lerp factor**: Changed from fixed 0.08 to adaptive (0.08–0.15) — faster when camera is far from target (catching up during rapid tree growth), slower when close (smooth settling)
+|||
+|||**Verification**:
+|||    - Full simulation: 1867/1867 commits processed
+|||    - 0 JS errors
+|||    - 0 overlaps at completion (settled immediately)
+|||    - MaxDirDepth pre-computed: 8 at start, decreasing to 6 as commits complete
+|||    - Camera Z=0.02 (top-down) ✓
+|||    - 166 road lines
+|||    - Blue beam pixels: 42 detected (A=Added) ✓
+|||    - Purple beam pixels: 12 detected (M=Modified) ✓
+|||    - Green beam pixels: 0 (green eliminated) ✓
+|||    - No bounces needed during 60–100% phase — future depth calculation pre-positions camera correctly

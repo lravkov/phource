@@ -77,6 +77,9 @@ let _bounceStartTime = 0;
 let _bounceTargetY = 0;
 let _bounceAmplitude = 0;
 let _lastPredictY = null;
+// Pre-computed max directory depth for remaining commits (for zoom planning)
+// _maxDirDepthRemaining[i] = max dir depth across commits[i+1..end]
+let _maxDirDepthRemaining = [];
 const BOUNCE_DURATION = 500;  // ms — snappy
 const BOUNCE_THRESHOLD = 0.01; // 1% change in target distance to trigger bounce
 const BOUNCE_OVERSHOOT = 0.05; // 5% overshoot past target
@@ -958,7 +961,7 @@ function updateRoadLines() {
 
 // Action type colours: distinguish add/mod/modify actions visually
 const ACTION_COLOURS = {
-    A: new THREE.Color(0x44ff44),  // Added   — green (new growth)
+    A: new THREE.Color(0x4488ff),  // Added   — blue (new growth)
     M: new THREE.Color(0xaa44ff),  // Modified — purple (change)
     D: new THREE.Color(0xff4444),  // Deleted  — red (removal)
 };
@@ -1448,7 +1451,12 @@ function predictCameraZoom() {
     const remaining = logEntries.length - commitIndex;
     const total = logEntries.length;
     const growthPadding = (remaining / total) * 0.4;  // up to 40% extra on first commit
-    const targetDistance = maxFutureDistance * (1 + growthPadding);
+
+    // Account for deepest future directory — ensures camera zooms far enough
+    // to see all files even in large repos where deep directories appear later
+    const futureMaxDepth = _maxDirDepthRemaining[commitIndex] || 0;
+    const futureMaxRadius = futureMaxDepth * ORBIT_DIR_RADIUS;
+    const targetDistance = Math.max(currentDistance, futureMaxRadius * 1.2) * (1 + growthPadding);
 
     // Trigger Disney bounce zoom when camera needs to make a significant jump
     // to reach the new target (compares target to current camera position,
@@ -1605,6 +1613,15 @@ async function init() {
 
         simTime = logEntries.length > 0 ? logEntries[0].timestamp : 0;
 
+        // Pre-compute max directory depth for remaining commits (for zoom planning)
+        // This ensures the camera always zooms out enough to see all future files
+        _maxDirDepthRemaining = new Array(logEntries.length + 1).fill(0);
+        for (let i = logEntries.length - 1; i >= 0; i--) {
+            const parts = logEntries[i].filepath.split('/');
+            const dirDepth = parts.length - 1;
+            _maxDirDepthRemaining[i] = Math.max(_maxDirDepthRemaining[i + 1], dirDepth);
+        }
+
         // Initialize scrubber timestamps
         if (logEntries.length > 0) {
             minTimestamp = logEntries[0].timestamp;
@@ -1692,7 +1709,11 @@ function animate(timestamp) {
                 const currentY = camera.position.y;
                 camera.position.x = 0;
                 camera.position.z = 0;
-                camera.position.y = currentY + (targetCamY - currentY) * 0.08;
+                // Adaptive lerp: faster when camera is far from target (catching up
+                // during rapid tree growth), slower when close (smooth settling)
+                const lerpFactor = Math.min(0.15, Math.max(0.08,
+                    Math.abs(targetCamY - currentY) / Math.max(currentY, 1)));
+                camera.position.y = currentY + (targetCamY - currentY) * lerpFactor;
                 controls.target.set(0, 0, 0);
                 controls.update();
             }
@@ -1735,7 +1756,7 @@ window.__phourceDebug = {
     get sceneChildren() { return scene ? scene.children.length : 0; },
     get roadLineCount() { return scene ? scene.children.filter(c => c.userData && c.userData.parent && c.userData.child).length : 0; },
     get cameraInfo() { return camera ? { x: camera.position.x, y: camera.position.y, z: camera.position.z } : null; },
-    get bounceState() { return { active: _bounceActive, targetY: _bounceTargetY, amplitude: _bounceAmplitude, startTime: _bounceStartTime, lastPredictY: _lastPredictY, cameraNeedsAutoFit }; },
+    get bounceState() { return { active: _bounceActive, targetY: _bounceTargetY, amplitude: _bounceAmplitude, startTime: _bounceStartTime, lastPredictY: _lastPredictY, cameraNeedsAutoFit, maxDirDepth: _maxDirDepthRemaining.length ? _maxDirDepthRemaining[Math.min(commitIndex, _maxDirDepthRemaining.length - 1)] : 0 }; },
     get sceneObjects() {
         if (!scene) return [];
         return scene.children.map(c => c.userData ? c.userData.type + ':' + (c.userData.nodeData ? c.userData.nodeData.name : c.userData.userName || '?') : c.type);
