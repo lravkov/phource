@@ -1291,6 +1291,7 @@ function onMouseMove(event) {
     mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
     tooltipElement.style.left = (event.clientX + 15) + 'px';
     tooltipElement.style.top = (event.clientY + 15) + 'px';
+    updateTooltip();
 }
 
 function updateTooltip() {
@@ -1316,7 +1317,7 @@ function updateTooltip() {
     }
     // Fallback: proximity check for directory spheres (too small to reliably raycast at distance)
     if (!nodeData && pickableObjects.length > 0) {
-        const PROXIMITY_THRESHOLD = 0.02; // ~12px at 600px width, ~25px at 1280px
+        const PROXIMITY_PIXELS = 30; // forgiveness zone: 30px radius regardless of screen size
         let closest = null;
         let closestDist = Infinity;
         for (let i = 0; i < pickableObjects.length; i++) {
@@ -1325,10 +1326,14 @@ function updateTooltip() {
                 const pos = obj.position.clone();
                 pos.y = obj.scale.y * 0.5;
                 const ndc = pos.clone().project(camera);
+                const screenX = ((ndc.x + 1) / 2) * window.innerWidth;
+                const screenY = ((-ndc.y + 1) / 2) * window.innerHeight;
+                const mouseScreenX = ((mouse.x + 1) / 2) * window.innerWidth;
+                const mouseScreenY = ((-mouse.y + 1) / 2) * window.innerHeight;
                 const dist = Math.sqrt(
-                    Math.pow(ndc.x - mouse.x, 2) + Math.pow(ndc.y - mouse.y, 2)
+                    Math.pow(screenX - mouseScreenX, 2) + Math.pow(screenY - mouseScreenY, 2)
                 );
-                if (dist < PROXIMITY_THRESHOLD && dist < closestDist) {
+                if (dist < PROXIMITY_PIXELS && dist < closestDist) {
                     closestDist = dist;
                     closest = obj;
                 }
