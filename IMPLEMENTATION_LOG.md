@@ -756,3 +756,21 @@ First attempt used a global `_beamCounter` incrementing per beam, with offset ba
 
 ### Other changes this session
 - Cache version bumped v=94 → v=95
+
+## Session 47 — Revert to direct beams + offset robustness
+
+**Change**: Reverted `BEAM_FOLLOW_TREE` to `false` per user request — beams travel directly from user/source to file position rather than following tree directory branches. Lateral offset system retained and strengthened.
+
+**Why**: Direct beams are visually clearer — the offset directly separates same-file beams without the visual noise of tree-path tracing. The offset system works on both the 2-point direct path and the tree-following path (applied in `updateBeamActions`).
+
+**Offset robustness improvements** (`public/phource.js`):
+- Increased base magnitude from 2 to 4: at mag=2, adjacent 30° directions near quadrant boundaries (e.g. angles near 345° and 15°) rounded to the same [x,z] pair
+- Expanding rings: `mag = 4 + ringIdx * 2.5` gives 12 unique directions per ring at increasing radii
+- Total 72 unique offsets per file (12 dirs × 6 rings), handles files modified up to 71 times
+- Debug function `beamDebug()` now returns `fullPath` to distinguish same-name files in different directories
+
+**Verification** (1875-commit tnom-bot log, direct beams):
+- Max concurrent beams: 96 simultaneously active
+- Same-path (same fullPath) duplicate offset incidents: **0**
+- 0 JS errors, 3 transient physics overlaps (settle to 0 after convergence)
+- Cache version bumped to v=98

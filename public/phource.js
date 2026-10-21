@@ -22,7 +22,7 @@ const GROUND_MATERIAL_COLOR = 0x0d2818;
 const SECONDS_PER_COMMIT = 0.5;  // Each commit batch visible for 0.5s — middle ground between too-fast (30 days/sec) and too-slow (3s/commit)
 const USER_IDLE_TIME = 6.0;
 const BEAM_DURATION = 1.2;
-const BEAM_FOLLOW_TREE = true;
+const BEAM_FOLLOW_TREE = false;
 const BEAM_LINE_WIDTH = 2;
 const BEAM_OPACITY = 0.85;            // Brighter with additive blending
 const BEAM_PROPAGATION_TIME = 0.15;   // 15% of duration for fast path reveal
@@ -1166,12 +1166,13 @@ function createBeamAction(userNode, fileNode, actionType) {
     }
     const baseAngle = (hash / 0x10000000) * Math.PI * 2;
     // Cycle through 12 distinct directions (30° apart) + expanding rings
-    // so repeated modifications of the same file (up to 60+ times) get unique offsets.
-    // Ring 0: 12 dirs at radius 2, Ring 1: 12 dirs at 3.5, Ring 2: 12 dirs at 5, etc.
+    // Base magnitude 4 ensures rounded offsets are unique across all 12 directions
+    // (at mag=2, adjacent angles near quadrant boundaries rounded to same value).
+    // Ring 0: 12 dirs at radius 4, Ring 1: 12 dirs at 6.5, Ring 2: 12 dirs at 9, etc.
     const dirFromIdx = offsetIdx % 12;
     const ringIdx = Math.floor(offsetIdx / 12);
     const offsetAngle = baseAngle + (dirFromIdx * Math.PI / 6);
-    const mag = 2 + ringIdx * 1.5;
+    const mag = 4 + ringIdx * 2.5;
     const beamOffset = new THREE.Vector3(
         Math.cos(offsetAngle) * mag,
         0,
@@ -2119,6 +2120,7 @@ window.__phourceDebug = {
                 progress: Math.round(ba.progress * 100) / 100,
                 actionType: ba.actionType,
                 fileName: ba.file.name,
+                fullPath: ba.file.fullPath || ba.file.name,
                 hasPathNodes: !!ba.pathNodes,
                 pathNodeCount: ba.pathNodes ? ba.pathNodes.length : 0,
                 hasGlowSphere: !!ba.glowSphere,
