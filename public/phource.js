@@ -1037,8 +1037,8 @@ const ACTION_COLOURS = {
 };
 
 function createUser(name) {
-    const r = 4 * GLOBAL_SCALE;
-    const h = 10 * GLOBAL_SCALE;
+    const r = 12 * GLOBAL_SCALE;
+    const h = 20 * GLOBAL_SCALE;
     const segs = 6;
 
     // Black fill cone (on top — covers beam origins so beams appear to emanate from behind)
@@ -1102,13 +1102,13 @@ function updateUserAvatars(dt) {
         }
 
         if (userNode.actions.length > 0) {
-            // Group actions by current batch (same commit timestamp) and move
-            // toward the midpoint between the average of all file positions
-            // touched in this batch and the root/parent node position.
-            // This keeps the committor drifting in the central region of the
-            // tree rather than flying to the outer edges when many files are
-            // touched at once (e.g., a fresh repo with all commits at the
-            // same timestamp = one giant batch).
+            // Weighted average toward the files touched in this batch,
+            // with a small pull toward the root/center anchor. This keeps
+            // the committor migrating toward the files it's touching with
+            // the beams rather than sitting dead-center, while still
+            // preventing wild excursions when a batch spans many files
+            // spread across the entire tree (e.g., a fresh repo with all
+            // commits at the same timestamp = one giant batch).
             const firstBatchTs = userNode.actions[0].batchTs;
             const batchFiles = [];
             for (let ai = 0; ai < userNode.actions.length; ai++) {
@@ -1130,16 +1130,19 @@ function updateUserAvatars(dt) {
                     count++;
                 }
             }
-            // Midpoint between file average and root/center anchor (origin)
+            // Weighted average: 75% toward file positions, 25% toward center anchor.
+            // This keeps the committor migrating toward the files it's touching
+            // rather than sitting dead-center, while still maintaining some
+            // centering when batches span many files across the tree.
             let avgPos;
             if (count > 0) {
                 fileAvg.x /= count;
                 fileAvg.y /= count;
                 fileAvg.z /= count;
                 avgPos = new THREE.Vector3(
-                    fileAvg.x / 2,
-                    (fileAvg.y + USER_HEIGHT) / 2,
-                    fileAvg.z / 2
+                    fileAvg.x * 0.75 + 0 * 0.25,
+                    fileAvg.y * 0.75 + USER_HEIGHT * 0.25,
+                    fileAvg.z * 0.75 + 0 * 0.25
                 );
             } else {
                 avgPos = new THREE.Vector3(0, USER_HEIGHT, 0);
