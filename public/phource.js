@@ -22,6 +22,8 @@ const GROUND_MATERIAL_COLOR = 0x0d2818;
 const SECONDS_PER_COMMIT = 0.5;  // Each commit batch visible for 0.5s — middle ground between too-fast (30 days/sec) and too-slow (3s/commit)
 const USER_IDLE_TIME = 6.0;
 const BEAM_DURATION = 1.2;
+const BEAM_FOLLOW_TREE = true;  // Follow tree path (root → dirs → file) vs direct user-to-file
+const BEAM_LINE_WIDTH = 2;       // Thicker than roads (1px) for Ikeda visibility
 const LERP_FACTOR = 0.12;
 const DIR_LAYOUT_LERP = 0.08;
 const USER_SPEED = 60.0;
@@ -1110,20 +1112,38 @@ function updateUserAvatars(dt) {
 function createBeamAction(userNode, fileNode, actionType) {
     const colour = ACTION_COLOURS[actionType] || new THREE.Color(0xffffff);
     const material = new THREE.LineBasicMaterial({
-        color: colour, transparent: true, opacity: 0, linewidth: 1,
+        color: colour, transparent: true, opacity: 0, linewidth: BEAM_LINE_WIDTH,
     });
     material.depthWrite = false;
     const geometry = new THREE.BufferGeometry();
     const beam = new THREE.Line(geometry, material);
     beam.renderOrder = 2;
     scene.add(beam);
+
+    // Store directory node references (not positions) so the beam path updates
+    // dynamically each frame as the orbital layout settles.
+    // Trace from file's parent up to root: root → dir1 → dir2 → ... → file
+    let pathNodes = null;
+    if (BEAM_FOLLOW_TREE && fileNode.parentDir) {
+        pathNodes = [];
+        let dir = fileNode.parentDir;
+        while (dir && dir !== root) {
+            pathNodes.unshift(dir);
+            dir = dir.parentDir;
+        }
+        // Only use tree path if there are intermediate directories
+        if (pathNodes.length === 0) pathNodes = null;
+    }
+
     beamActions.push({
         user: userNode, file: fileNode, beam,
         progress: 0, duration: BEAM_DURATION, actionType,
+        pathNodes: pathNodes,
     });
 }
 
 function updateBeamActions(dt) {
+    const roadY = DIR_SPHERE_RADIUS / 2 + 0.5;
     for (let i = beamActions.length - 1; i >= 0; i--) {
         const ba = beamActions[i];
         ba.progress += dt / ba.duration;
@@ -1134,15 +1154,43 @@ function updateBeamActions(dt) {
             beamActions.splice(i, 1);
             continue;
         }
-        const userPos = ba.user.pos;
-        const filePos = new THREE.Vector3(
-            ba.file.targetPos.x,
-            Math.max(ba.file.buildingHeight, 0.1) / 2,
-            ba.file.targetPos.z
-        );
-        const geometry = new THREE.BufferGeometry().setFromPoints([userPos, filePos]);
+
+        let points;
+        if (ba.pathNodes) {
+            // Tree-following beam: rebuild path each frame from node references
+            // so it tracks layout updates as the tree settles into position
+            const pts = [];
+            pts.push(new THREE.Vector3(0, roadY, 0));  // root at road level
+            for (const d of ba.pathNodes) {
+                if (d.targetPos) {
+                    pts.push(new THREE.Vector3(d.targetPos.x, roadY, d.targetPos.z));
+                }
+            }
+            const fileHeight = Math.max(ba.file.buildingHeight || 0, 0.1);
+            pts.push(new THREE.Vector3(
+                ba.file.targetPos.x,
+                fileHeight / 2,
+                ba.file.targetPos.z
+            ));
+            // Progressive reveal: beam grows from root along the tree toward the file.
+            // Use floor(t * (n-1)) + 2 to guarantee at least one visible segment.
+            const t = ba.progress;
+            const n = pts.length;
+            const cutoff = Math.min(n, Math.floor(t * (n - 1)) + 2);
+            points = pts.slice(0, cutoff);
+        } else {
+            // Direct beam fallback (root-level files or BEAM_FOLLOW_TREE=false)
+            const userPos = ba.user.pos;
+            const filePos = new THREE.Vector3(
+                ba.file.targetPos.x,
+                Math.max(ba.file.buildingHeight, 0.1) / 2,
+                ba.file.targetPos.z
+            );
+            points = [userPos, filePos];
+        }
+
         ba.beam.geometry.dispose();
-        ba.beam.geometry = geometry;
+        ba.beam.geometry = new THREE.BufferGeometry().setFromPoints(points);
         const fadeFactor = 1.0 - Math.abs(ba.progress - 0.5) * 2;
         ba.beam.material.opacity = 0.7 * Math.max(0, fadeFactor);
         ba.beam.material.needsUpdate = true;
