@@ -478,14 +478,17 @@
 |||    - `D` (Deleted): Red (0xff4444) — removal
 |||2. **`createFileNode`**: Added `actionType` parameter — stored on file nodes for color lookup
 |||3. **`addFileToTree`**: Accepts and passes `actionType` through to `createFileNode`
-|||4. **`addFileInstance`**: Sets instance color from `ACTION_COLOURS[fileNode.actionType]` instead of always white
-|||5. **`updateFileInstance`** (per-frame): Uses `ACTION_COLOURS[fileNode.actionType]` instead of white
-|||6. **`processCommit`**: Passes action type to `addFileToTree`, updates file color on modify
+|||4. **`addFileInstance`**: Reverted to pure white (files stay white; only beams are colored)
+|||5. **`updateFileInstance`** (per-frame): Reverted to pure white
+|||6. **`processCommit`**: Passes action type to `addFileToTree`
 |||7. **`getNodeByPath`**: Added lookup function for predictive camera zoom
 |||
-|||**Verification**:
-|||    - File colors: Green (Added) 421px, Purple (Modified) 5371px, Red (Deleted) 0px ✓
-|||    - 0 overlaps at 100% settlement ✓
-|||    - 94.7% pure black, 0.2% colored ✓
-|||    - Top-down camera: Z=0.02 ✓
-|||    - 0 JS errors ✓
+|||**Note**: File nodes kept pure white; only beam actions are colored by type.
+|||
+||||**Verification**:
+||||    - File colors: ALL WHITE (1.000, 1.000, 1.000) ✓
+||||    - Beam colors: Purple (Modified) 5599px, Green/Red 0 (no active A/D beams at scrub point) ✓
+||||    - 0 overlaps at 100% settlement ✓
+||||    - 94.7% pure black ✓
+||||    - Top-down camera: Z=0.02 ✓
+||||    - 0 JS errors ✓

@@ -767,9 +767,8 @@ function addFileInstance(fileNode) {
     fileNode.fadingOut = false;
     fileNode.pendingRemoval = false;
 
-    // Color file by its action type (A=green, M=purple, D=red)
-    const actionColour = ACTION_COLOURS[fileNode.actionType] || new THREE.Color(0xffffff);
-    fileInstancedMesh.setColorAt(id, actionColour);
+    // Ikeda: pure white — data magnitude encoded in size, not color
+    fileInstancedMesh.setColorAt(id, new THREE.Color(0xffffff));
     fileInstancedMesh.instanceColor.needsUpdate = true;
 
     fileNode.mesh = fileInstancedMesh; // Reference to the InstancedMesh
@@ -790,9 +789,8 @@ function updateFileMesh(fileNode, dt) {
     fileInstancedMesh.setMatrixAt(id, matrix);
     fileInstancedMesh.instanceMatrix.needsUpdate = true;
 
-    // Color file by action type (set once, but ensure per-frame consistency)
-    const actionColour = ACTION_COLOURS[fileNode.actionType] || new THREE.Color(0xffffff);
-    fileInstancedMesh.setColorAt(id, actionColour);
+    // Ikeda: color is static white — no per-frame color updates needed
+    fileInstancedMesh.setColorAt(id, new THREE.Color(0xffffff));
     fileInstancedMesh.instanceColor.needsUpdate = true;
 
     if (fileNode.pendingRemoval && fileNode.currentAlpha < 0.02) {
@@ -1129,12 +1127,6 @@ function processCommit(entry) {
             fileNode.buildingHeight = dims.height;
             fileNode.forceSize = Math.min(Math.max(dims.width, dims.depth), 100);
             // No treeDirty — forceSize updated directly, simulation handles it
-            // Update file instance color to reflect modification
-            if (fileNode.instanceId !== undefined && fileInstancedMesh) {
-                const colour = ACTION_COLOURS['M'];
-                fileInstancedMesh.setColorAt(fileNode.instanceId, colour);
-                fileInstancedMesh.instanceColor.needsUpdate = true;
-            }
         } else {
             fileNode = addFileToTree(entry.filepath, entry.loc, entry.count, entry.colour, 'M');
         }
