@@ -62,7 +62,8 @@ const fileInstanceNodes = []; // instanceId -> fileNode
 const FILE_INSTANCES_CAPACITY = 3000;
 
 let logEntries = [];
-let loadedBranches = ['main'];
+let loadedBranches = [];
+let primaryBranch = null;  // Set to first branch loaded — files get no prefix
 let commitIndex = 0;
 let simTime = 0;
 let simStarted = false;
@@ -400,15 +401,13 @@ function calculateOrbitalLayout(rootNode) {
             });
         }
 
-        // Place files in a circular cluster around each directory sphere
+        // Place files on concentric rings around the directory sphere.
+        // Using rings (not a single cluster) prevents file-file overlaps,
+        // so resolveOverlaps doesn't need to push files (and directories)
+        // far from their orbital positions — preserving road line structure.
         if (files.length > 0) {
             const nodeSize = (node.forceSize || 50) / 2;
-            // Cluster files in a CIRCLE around the parent directory's position.
-            // All files placed at the same radius (single ring) around the
-            // directory sphere — no radial extension to concentric rings.
-            const clusterRadius = nodeSize + 20;  // Just past the directory sphere
-
-            // Sort by size (largest first)
+            const baseRadius = nodeSize + 20;  // Just past the directory sphere
             const sorted = [...files].sort((a, b) => {
                 const as = Math.max(a.buildingWidth, a.buildingDepth);
                 const bs = Math.max(b.buildingWidth, b.buildingDepth);
@@ -418,16 +417,27 @@ function calculateOrbitalLayout(rootNode) {
             const anchorX = node.targetPos.x;
             const anchorZ = node.targetPos.z;
 
-            // Place ALL files in a single circular cluster around the directory
-            const count = sorted.length;
-            for (let j = 0; j < count; j++) {
+            // Place files on concentric rings around the directory sphere.
+            // Each ring holds as many files as its circumference allows.
+            // Largest files placed first (inner rings) for stability.
+            let ring = 0;
+            let placed = 0;
+            for (let j = 0; j < sorted.length; j++) {
                 const file = sorted[j];
                 file.parentDir = node;
-                const angle = (j / count) * Math.PI * 2;  // Full 360° around directory
+                const fileSize = Math.max(file.buildingWidth, file.buildingDepth);
+                const ringRadius = baseRadius + ring * (MIN_FILE_GAP * 2);
+                const capacity = Math.max(1, Math.floor((2 * Math.PI * ringRadius) / (MIN_FILE_GAP * 2)));
+                if (placed >= capacity) {
+                    ring++;
+                    placed = 0;
+                }
+                const angle = (placed / capacity) * Math.PI * 2;
+                const r = ringRadius + fileSize / 2 + MIN_FILE_GAP;
                 file.targetPos = new THREE.Vector3(
-                    anchorX + Math.cos(angle) * clusterRadius,
+                    anchorX + Math.cos(angle) * r,
                     node.foundationHeight + file.buildingHeight / 2,
-                    anchorZ + Math.sin(angle) * clusterRadius
+                    anchorZ + Math.sin(angle) * r
                 );
                 file.orbitRadius = Math.sqrt(
                     file.targetPos.x ** 2 + file.targetPos.z ** 2
@@ -467,6 +477,9 @@ function stepOrbitalLayout(dt) {
 
 // Overlap resolution: spatial grid O(n·k) with 5 inner passes.
 // Rebuilds grid each pass since positions change.
+// IMPORTANT: only pushes FILE nodes (not directories) to preserve the
+// orbital angular ordering of directory nodes. Pushing directories would
+// cause road lines (parent-child connections) to cross each other.
 function resolveOverlaps() {
     if (!forceLayoutNodes || forceLayoutNodes.length === 0) {
         if (!root || !root.targetPos) return;
@@ -491,12 +504,12 @@ function resolveOverlaps() {
     const n = nodes.length;
     const pushX = new Float64Array(n);
     const pushZ = new Float64Array(n);
-    for (let pass = 0; pass < 5; pass++) {
+    for (let pass = 0; pass < 10; pass++) {  // Increased from 5 for large repos
         // Rebuild grid each pass (positions have moved)
         const grid = new Map();
         for (let i = 0; i < n; i++) {
             const a = nodes[i];
-            if (!a || a === root) continue;
+            if (!a || a === root || a.isDirectory) continue;
             const cx = Math.floor(a.targetPos.x / cellSize);
             const cz = Math.floor(a.targetPos.z / cellSize);
             const key = cx + ',' + cz;
@@ -550,7 +563,7 @@ function resolveOverlaps() {
         }
         for (let i = 0; i < n; i++) {
             const d = nodes[i];
-            if (!d || d === root) continue;
+            if (!d || d === root || d.isDirectory) continue;
             d.targetPos.x += pushX[i];
             d.targetPos.z += pushZ[i];
         }
@@ -568,42 +581,6 @@ function computeSceneBounds() {
     });
     root.calculatedOuterWidth = Math.max(maxX - minX, 100);
     root.calculatedOuterDepth = Math.max(maxZ - minZ, 100);
-}
-
-function positionFilesInTree(node) {
-    if (!node || !node.isDirectory) return;
-    const dirPos = node.targetPos;
-    const childFiles = node.childFiles || [];
-    if (childFiles.length > 0) {
-        // Place files on concentric rings to prevent overlap
-        const sortedFiles = [...childFiles].sort((a, b) => {
-            const aSize = Math.max(a.buildingWidth, a.buildingDepth);
-            const bSize = Math.max(b.buildingWidth, b.buildingDepth);
-            return bSize - aSize; // Largest first
-        });
-        const baseRadius = (node.forceSize || 50) + MIN_FILE_GAP;
-        let ring = 0;
-        let placed = 0;
-        for (let i = 0; i < sortedFiles.length; i++) {
-            const file = sortedFiles[i];
-            const fileSize = Math.max(file.buildingWidth, file.buildingDepth);
-            const ringRadius = baseRadius + ring * (MIN_FILE_GAP * 2);
-            const capacity = Math.max(1, Math.floor((2 * Math.PI * ringRadius) / (MIN_FILE_GAP * 2)));
-            if (placed >= capacity) {
-                ring++;
-                placed = 0;
-            }
-            const angle = (placed / capacity) * Math.PI * 2;
-            const r = baseRadius + ring * (MIN_FILE_GAP * 2) + fileSize / 2 + MIN_FILE_GAP;
-            file.targetPos.set(
-                dirPos.x + Math.cos(angle) * r,
-                node.foundationHeight + file.buildingHeight / 2,
-                dirPos.z + Math.sin(angle) * r
-            );
-            placed++;
-        }
-    }
-    node.childDirectories.forEach(child => positionFilesInTree(child));
 }
 
 function stepForceLayout(noCooldown) {
@@ -717,17 +694,18 @@ let forceFrameCount = 0;
 function stepOrbitalSimulation(dt) {
     if (isScrubbing) return;
     forceFrameCount++;
-    // No continuous physics during playback — safety net only.
-    // Thorough settling runs via settleCompleteLayout() after sim pause or scrub.
-    if (forceFrameCount % 30 === 0) resolveOverlaps();
+    // resolveOverlaps only during active settling — not during playback.
+    // Running it during playback jitters small files and can push directory
+    // nodes out of their orbital angular order, causing road lines to cross.
+    if (forceSimRunning && forceFrameCount % 30 === 0) resolveOverlaps();
 }
 
 // Async chunked settling — runs initial 10 passes synchronously (layout is
 // already good from calculateOrbitalLayout + 10 resolveOverlaps in rebuildLayout),
 // then remaining passes in async chunks via setTimeout(0) to keep UI responsive.
 // Total passes reduced from 500 to 30 for near-instant scrub response.
-const SETTLE_TOTAL_PASSES = 30;
-const SETTLE_SYNC_PASSES = 10;
+const SETTLE_TOTAL_PASSES = 50;
+const SETTLE_SYNC_PASSES = 15;
 const SETTLE_CHUNK_SIZE = 10;
 let _settleRemaining = 0;
 
@@ -848,8 +826,18 @@ function updateFileMesh(fileNode, dt) {
     fileNode.currentAlpha = THREE.MathUtils.lerp(fileNode.currentAlpha, fileNode.targetAlpha, 0.15);
     const targetScale = (fileNode.forceSize || 10) * fileNode.currentAlpha;
     fileNode.currentScale = THREE.MathUtils.lerp(fileNode.currentScale, targetScale, LERP_FACTOR);
-    fileNode.currentX = THREE.MathUtils.lerp(fileNode.currentX, fileNode.targetPos.x, LERP_FACTOR);
-    fileNode.currentZ = THREE.MathUtils.lerp(fileNode.currentZ, fileNode.targetPos.z, LERP_FACTOR);
+
+    // Position: snap to target when close (prevents micro-jitter from force layout),
+    // lerp when far (smooth animation during spawn/movement)
+    const dx = fileNode.targetPos.x - fileNode.currentX;
+    const dz = fileNode.targetPos.z - fileNode.currentZ;
+    if (Math.abs(dx) > 0.5 || Math.abs(dz) > 0.5) {
+        fileNode.currentX = THREE.MathUtils.lerp(fileNode.currentX, fileNode.targetPos.x, LERP_FACTOR);
+        fileNode.currentZ = THREE.MathUtils.lerp(fileNode.currentZ, fileNode.targetPos.z, LERP_FACTOR);
+    } else {
+        fileNode.currentX = fileNode.targetPos.x;
+        fileNode.currentZ = fileNode.targetPos.z;
+    }
     const matrix = new THREE.Matrix4();
     matrix.makeScale(fileNode.currentScale, fileNode.currentScale, fileNode.currentScale);
     matrix.setPosition(fileNode.currentX, fileNode.currentScale / 2, fileNode.currentZ);
@@ -1009,9 +997,9 @@ function offsetSubtreePositions(node, dx, dy, dz) {
 function offsetBranchTrees() {
     if (!root || !root.childDirectories) return;
 
-    // Only offset directories that correspond to actual non-'main' branch names
-    // from the loaded logs. The 'main' branch has no prefix directory.
-    const branchNames = loadedBranches.filter(b => b !== 'main');
+    // Only offset directories that correspond to actual non-primary branch names
+    // from the loaded logs. The primary branch has no prefix directory.
+    const branchNames = loadedBranches.filter(b => b !== (primaryBranch || 'main'));
     const branchDirs = root.childDirectories.filter(d => d.name && branchNames.includes(d.name));
     if (branchNames.length === 0) return; // No secondary branches
 
@@ -1462,6 +1450,10 @@ async function loadLog(url, branchName = 'main') {
     rawEntries.forEach(e => {
         if (!loadedBranches.includes(e.branch)) loadedBranches.push(e.branch);
     });
+    // First log loaded becomes the primary (unprefixed) branch
+    if (rawEntries.length > 0 && primaryBranch === null) {
+        primaryBranch = rawEntries[0].branch;
+    }
     console.log(`phource: loaded ${logEntries.length} log entries (from ${url}, branch=${branchName})`);
     return rawEntries;
 }
@@ -1474,10 +1466,11 @@ function processCommit(entry) {
     userNode.targetAlpha = 1;
     userNode.fadingOut = false;
 
-    // Prefix filepath with branch name so two branches get separate trees
-    // under their own top-level directories (e.g., "main/src/file.js")
-    const branch = entry.branch || 'main';
-    const filePath = branch !== 'main' ? branch + '/' + entry.filepath : entry.filepath;
+    // Prefix filepath with branch name so non-primary branches get separate trees
+    // under their own top-level directories (e.g., "feature-branch/src/file.js")
+    // The primary branch (first loaded) has no prefix — its files live at root.
+    const branch = entry.branch || primaryBranch || 'main';
+    const filePath = branch !== (primaryBranch || 'main') ? branch + '/' + entry.filepath : entry.filepath;
 
     let fileNode = null;
     if (entry.action === 'A') {
@@ -1853,8 +1846,8 @@ function predictCameraZoom() {
     let maxFutureDistance = currentDistance;
     for (let i = 0; i < lookahead && commitIndex + i < logEntries.length; i++) {
         const futureEntry = logEntries[commitIndex + i];
-        const branch = futureEntry.branch || 'main';
-        const futurePath = branch !== 'main' ? branch + '/' + futureEntry.filepath : futureEntry.filepath;
+        const branch = futureEntry.branch || primaryBranch || 'main';
+        const futurePath = branch !== (primaryBranch || 'main') ? branch + '/' + futureEntry.filepath : futureEntry.filepath;
         const futureNode = getNodeByPath(futurePath);
         if (futureNode && futureNode.isDirectory) {
             // Estimate this directory's eventual radius based on depth
@@ -2261,7 +2254,7 @@ window.__phourceDebug = {
         return u ? [Math.round(u.pos.x), Math.round(u.pos.y), Math.round(u.pos.z)] : null;
     },
     get controlTarget() { return controls ? Array.from(controls.target) : null; },
-    get simState() { return { simStarted, simTime, commitIndex, fileMapSize: fileMap.size, usersSize: users.size, beamCount: beamActions.length, maxCommitCount, dtSum, frameCount, isScrubbing, simPaused, minTs: minTimestamp, maxTs: maxTimestamp, loadedBranches }; },
+    get simState() { return { simStarted, simTime, commitIndex, fileMapSize: fileMap.size, usersSize: users.size, beamCount: beamActions.length, maxCommitCount, dtSum, frameCount, isScrubbing, simPaused, minTs: minTimestamp, maxTs: maxTimestamp, loadedBranches, primaryBranch }; },
     get rootDims() { return root ? { w: root.calculatedOuterWidth, d: root.calculatedOuterDepth } : null; },
     get userDebug() {
         if (!users || users.size === 0) return null;
