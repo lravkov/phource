@@ -62,6 +62,7 @@ const fileInstanceNodes = []; // instanceId -> fileNode
 const FILE_INSTANCES_CAPACITY = 3000;
 
 let logEntries = [];
+let loadedBranches = ['main'];
 let commitIndex = 0;
 let simTime = 0;
 let simStarted = false;
@@ -766,6 +767,8 @@ function rebuildLayout() {
     if (!root) return;
     calculateDirectoryStats(root);
     calculateOrbitalLayout(root);
+    // Offset branch subtrees side-by-side (no-op for single-branch mode)
+    offsetBranchTrees();
     maxCommitCount = 1;
     for (const node of fileMap.values()) {
         if (node.count > maxCommitCount) maxCommitCount = node.count;
@@ -970,6 +973,75 @@ function updateAllMeshes(dt) {
 }
 
 // === Road (connection line) rendering ===
+
+// === Branch support: side-by-side tree offsetting ===
+// After calculateOrbitalLayout positions branch subtrees on concentric rings,
+// we offset them horizontally to place them side-by-side rather than
+// angularly around the root. This gives a cleaner split-screen view.
+
+function computeSubtreeBounds(node) {
+    let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+    (function walk(n) {
+        if (!n || !n.targetPos) return;
+        minX = Math.min(minX, n.targetPos.x);
+        maxX = Math.max(maxX, n.targetPos.x);
+        minZ = Math.min(minZ, n.targetPos.z);
+        maxZ = Math.max(maxZ, n.targetPos.z);
+        if (n.isDirectory) {
+            n.childFiles.forEach(walk);
+            n.childDirectories.forEach(walk);
+        }
+    })(node);
+    return { minX, maxX, minZ, maxZ };
+}
+
+function offsetSubtreePositions(node, dx, dy, dz) {
+    if (!node || !node.targetPos) return;
+    node.targetPos.x += dx;
+    node.targetPos.y += dy;
+    node.targetPos.z += dz;
+    if (node.isDirectory) {
+        node.childFiles.forEach(n => offsetSubtreePositions(n, dx, dy, dz));
+        node.childDirectories.forEach(n => offsetSubtreePositions(n, dx, dy, dz));
+    }
+}
+
+function offsetBranchTrees() {
+    if (!root || !root.childDirectories) return;
+
+    // Only offset directories that correspond to actual non-'main' branch names
+    // from the loaded logs. The 'main' branch has no prefix directory.
+    const branchNames = loadedBranches.filter(b => b !== 'main');
+    const branchDirs = root.childDirectories.filter(d => d.name && branchNames.includes(d.name));
+    if (branchNames.length === 0) return; // No secondary branches
+
+    // Sort: main first if present, then alphabetical
+    branchDirs.sort((a, b) => {
+        if (a.name === 'main') return -1;
+        if (b.name === 'main') return 1;
+        return a.name.localeCompare(b.name);
+    });
+
+    const PADDING = 600;
+    let currentX = 0;
+
+    branchDirs.forEach(dir => {
+        const bounds = computeSubtreeBounds(dir);
+        const width = bounds.maxX - bounds.minX;
+        const depth = bounds.maxZ - bounds.minZ;
+        const centerX = (bounds.minX + bounds.maxX) / 2;
+        const centerZ = (bounds.minZ + bounds.maxZ) / 2;
+
+        // Center this subtree on the current slot
+        const targetCenterX = currentX + width / 2;
+        const offsetX = targetCenterX - centerX;
+        const offsetZ = -centerZ; // Center on z=0
+
+        offsetSubtreePositions(dir, offsetX, 0, offsetZ);
+
+        currentX = targetCenterX + width / 2 + PADDING;
+    });
+}
 
 function createRoadLines() {
     // Dispose existing lines
@@ -1368,10 +1440,11 @@ function parseLogEntry(line) {
         loc: parseInt(parts[4], 10),
         count: parts[5] ? parseInt(parts[5], 10) : 1,
         colour: parts[6] || '',
+        branch: parts[7] || 'main',
     };
 }
 
-async function loadLog(url) {
+async function loadLog(url, branchName = 'main') {
     loadingElement.textContent = 'Loading log...';
     loadingElement.style.display = 'block';
     const response = await fetch(url);
@@ -1379,10 +1452,18 @@ async function loadLog(url) {
     const text = await response.text();
     const rawEntries = text.trim().split('\n')
         .map(parseLogEntry).filter(e => e !== null);
+    rawEntries.forEach(e => {
+        // Use branch field from the entry itself; fall back to branchName param
+        if (!e.branch) e.branch = branchName;
+    });
     rawEntries.sort((a, b) => a.timestamp - b.timestamp);
-    logEntries = rawEntries;
-    console.log(`phource: loaded ${logEntries.length} log entries`);
-    return logEntries;
+    logEntries.push(...rawEntries);
+    // Track unique branch names for branch-aware layout
+    rawEntries.forEach(e => {
+        if (!loadedBranches.includes(e.branch)) loadedBranches.push(e.branch);
+    });
+    console.log(`phource: loaded ${logEntries.length} log entries (from ${url}, branch=${branchName})`);
+    return rawEntries;
 }
 
 // === Simulation ===
@@ -1393,11 +1474,16 @@ function processCommit(entry) {
     userNode.targetAlpha = 1;
     userNode.fadingOut = false;
 
+    // Prefix filepath with branch name so two branches get separate trees
+    // under their own top-level directories (e.g., "main/src/file.js")
+    const branch = entry.branch || 'main';
+    const filePath = branch !== 'main' ? branch + '/' + entry.filepath : entry.filepath;
+
     let fileNode = null;
     if (entry.action === 'A') {
-        fileNode = addFileToTree(entry.filepath, entry.loc, entry.count, entry.colour, 'A');
+        fileNode = addFileToTree(filePath, entry.loc, entry.count, entry.colour, 'A');
     } else if (entry.action === 'M') {
-        fileNode = fileMap.get(entry.filepath);
+        fileNode = fileMap.get(filePath);
         if (fileNode) {
             fileNode.loc = entry.loc;
             fileNode.count = entry.count;
@@ -1414,10 +1500,10 @@ function processCommit(entry) {
             fileNode.forceSize = Math.min(Math.max(dims.width, dims.depth), 100);
             // No treeDirty — forceSize updated directly, simulation handles it
         } else {
-            fileNode = addFileToTree(entry.filepath, entry.loc, entry.count, entry.colour, 'M');
+            fileNode = addFileToTree(filePath, entry.loc, entry.count, entry.colour, 'M');
         }
     } else if (entry.action === 'D') {
-        fileNode = fileMap.get(entry.filepath);
+        fileNode = fileMap.get(filePath);
         if (fileNode) {
             if (!isScrubbing) createBeamAction(userNode, fileNode, 'D');
             fileNode.targetAlpha = 0;
@@ -1734,12 +1820,17 @@ function createInitialMeshes() {
 
 function positionCamera() {
     if (!root) return;
-    const w = root.calculatedOuterWidth || 100;
-    const d = root.calculatedOuterDepth || 100;
+    // Compute bounds from actual positions (accounts for branch offsets)
+    const bounds = computeSubtreeBounds(root);
+    const w = bounds.maxX - bounds.minX || root.calculatedOuterWidth || 100;
+    const d = bounds.maxZ - bounds.minZ || root.calculatedOuterDepth || 100;
     const camDistance = Math.max(w, d) * 0.8;
     // Top-down view: camera directly above looking straight down (Ikeda monochrome aesthetic)
     camera.position.set(0, camDistance, 0);
-    controls.target.set(0, 0, 0);
+    // Center camera target on the midpoint of both branch trees
+    const centerX = (bounds.minX + bounds.maxX) / 2;
+    const centerZ = (bounds.minZ + bounds.maxZ) / 2;
+    controls.target.set(centerX, 0, centerZ);
     controls.update();
 }
 
@@ -1752,8 +1843,9 @@ function predictCameraZoom() {
         return;
     }
 
-    const w = root.calculatedOuterWidth || 100;
-    const d = root.calculatedOuterDepth || 100;
+    const bounds = computeSubtreeBounds(root);
+    const w = (bounds.maxX - bounds.minX) || root.calculatedOuterWidth || 100;
+    const d = (bounds.maxZ - bounds.minZ) || root.calculatedOuterDepth || 100;
     const currentDistance = Math.max(w, d) * 0.8;
 
     // Look ahead at next 5 commits to predict growth
@@ -1761,7 +1853,9 @@ function predictCameraZoom() {
     let maxFutureDistance = currentDistance;
     for (let i = 0; i < lookahead && commitIndex + i < logEntries.length; i++) {
         const futureEntry = logEntries[commitIndex + i];
-        const futureNode = getNodeByPath(futureEntry.filepath);
+        const branch = futureEntry.branch || 'main';
+        const futurePath = branch !== 'main' ? branch + '/' + futureEntry.filepath : futureEntry.filepath;
+        const futureNode = getNodeByPath(futurePath);
         if (futureNode && futureNode.isDirectory) {
             // Estimate this directory's eventual radius based on depth
             const futureRadius = futureNode.depth * ORBIT_DIR_RADIUS;
@@ -1934,11 +2028,21 @@ async function init() {
     try {
         let logUrl = 'phource.log';
         try {
-            await loadLog(logUrl);
+            await loadLog(logUrl, 'main');
         } catch (e) {
             logUrl = 'test-gource-log.phource';
-            await loadLog(logUrl);
+            await loadLog(logUrl, 'main');
         }
+
+        // Load secondary branch log for side-by-side comparison (if it exists)
+        try {
+            await loadLog('phource-branch.log', 'branch');
+        } catch (e) {
+            // No secondary branch log — single-branch mode is fine
+        }
+
+        // Sort all entries by timestamp (merges both branches)
+        logEntries.sort((a, b) => a.timestamp - b.timestamp);
 
         simTime = logEntries.length > 0 ? logEntries[0].timestamp : 0;
 
@@ -2003,11 +2107,15 @@ function animate(timestamp) {
         if (performance.now() - lastUserInteraction < AUTO_FIT_COOLDOWN) {
             // Still set the flag so it fires again next frame after cooldown
         } else {
-            const w = root ? (root.calculatedOuterWidth || 100) : 100;
-            const d = root ? (root.calculatedOuterDepth || 100) : 100;
+            const bounds = root ? computeSubtreeBounds(root) : null;
+            const w = bounds ? (bounds.maxX - bounds.minX || root.calculatedOuterWidth || 100) : (root ? (root.calculatedOuterWidth || 100) : 100);
+            const d = bounds ? (bounds.maxZ - bounds.minZ || root.calculatedOuterDepth || 100) : (root ? (root.calculatedOuterDepth || 100) : 100);
             const camDistance = Math.max(w, d) * 0.8;
             const targetY = _cameraTargetY !== null ? _cameraTargetY : camDistance;
             const targetCamY = Math.max(camDistance, targetY);
+            // Scene center — for single-branch (origin-centered) this is (0, 0)
+            const centerX = bounds ? (bounds.minX + bounds.maxX) / 2 : 0;
+            const centerZ = bounds ? (bounds.minZ + bounds.maxZ) / 2 : 0;
 
             if (_bounceActive) {
                 // Disney bounce zoom: damped oscillation toward target with 5% overshoot
@@ -2015,10 +2123,10 @@ function animate(timestamp) {
                 const t = Math.min(elapsed / BOUNCE_DURATION, 1.0);
                 if (t >= 1.0) {
                     // Bounce complete — settle at latest target (not stale _bounceTargetY)
-                    camera.position.x = 0;
-                    camera.position.z = 0;
+                    camera.position.x = centerX;
+                    camera.position.z = centerZ;
                     camera.position.y = targetCamY;
-                    controls.target.set(0, 0, 0);
+                    controls.target.set(centerX, 0, centerZ);
                     controls.update();
                     _bounceActive = false;
                     _lastBounceEndTime = performance.now();
@@ -2027,17 +2135,17 @@ function animate(timestamp) {
                     const decay = Math.exp(-t * 4);
                     const oscillation = Math.cos(t * Math.PI * 2.5);
                     const bounceY = _bounceTargetY + _bounceAmplitude * decay * oscillation;
-                    camera.position.x = 0;
-                    camera.position.z = 0;
+                    camera.position.x = centerX;
+                    camera.position.z = centerZ;
                     camera.position.y = bounceY;
-                    controls.target.set(0, 0, 0);
+                    controls.target.set(centerX, 0, centerZ);
                     controls.update();
                 }
             } else {
                 // Normal smooth lerp toward target
                 const currentY = camera.position.y;
-                camera.position.x = 0;
-                camera.position.z = 0;
+                camera.position.x = centerX;
+                camera.position.z = centerZ;
                 // Deadzone: if camera is within 0.2% of target, don't adjust.
                 // Prevents jitter from tiny target changes (growth padding
                 // decreases ~0.02%/commit) during steady-state animation.
@@ -2046,7 +2154,7 @@ function animate(timestamp) {
                     const lerpFactor = Math.min(0.15, Math.max(0.08, moveRatio));
                     camera.position.y = currentY + (targetCamY - currentY) * lerpFactor;
                 }
-                controls.target.set(0, 0, 0);
+                controls.target.set(centerX, 0, centerZ);
                 controls.update();
             }
 
@@ -2153,7 +2261,7 @@ window.__phourceDebug = {
         return u ? [Math.round(u.pos.x), Math.round(u.pos.y), Math.round(u.pos.z)] : null;
     },
     get controlTarget() { return controls ? Array.from(controls.target) : null; },
-    get simState() { return { simStarted, simTime, commitIndex, fileMapSize: fileMap.size, usersSize: users.size, beamCount: beamActions.length, maxCommitCount, dtSum, frameCount, isScrubbing, simPaused, minTs: minTimestamp, maxTs: maxTimestamp }; },
+    get simState() { return { simStarted, simTime, commitIndex, fileMapSize: fileMap.size, usersSize: users.size, beamCount: beamActions.length, maxCommitCount, dtSum, frameCount, isScrubbing, simPaused, minTs: minTimestamp, maxTs: maxTimestamp, loadedBranches }; },
     get rootDims() { return root ? { w: root.calculatedOuterWidth, d: root.calculatedOuterDepth } : null; },
     get userDebug() {
         if (!users || users.size === 0) return null;
@@ -2185,12 +2293,15 @@ window.__phourceDebug = {
     },
     repositionCamera: function() {
         if (!root || !camera || !controls) return;
-        const w = root.calculatedOuterWidth || 100;
-        const d = root.calculatedOuterDepth || 100;
+        const bounds = computeSubtreeBounds(root);
+        const w = (bounds.maxX - bounds.minX) || root.calculatedOuterWidth || 100;
+        const d = (bounds.maxZ - bounds.minZ) || root.calculatedOuterDepth || 100;
         const camDistance = Math.max(w, d) * 0.8;
+        const centerX = (bounds.minX + bounds.maxX) / 2;
+        const centerZ = (bounds.minZ + bounds.maxZ) / 2;
         // Top-down view: camera directly above looking straight down
-        camera.position.set(0, camDistance, 0);
-        controls.target.set(0, 0, 0);  // Look at tree center
+        camera.position.set(centerX, camDistance, centerZ);
+        controls.target.set(centerX, 0, centerZ);
         controls.update();
     },
     scrubToTime: function(timestamp) {
@@ -2371,6 +2482,20 @@ window.__phourceDebug = {
             }
         }
         return { activeFiles: fileMap.size, totalInstances: fileInstanceCount, staleCount, staleFiles };
+    },
+    get radialDistribution() {
+        if (!root) return null;
+        const distribution = [];
+        (function walk(node) {
+            if (!node) return;
+            const r = node.targetPos ? Math.sqrt(node.targetPos.x * node.targetPos.x + node.targetPos.z * node.targetPos.z) : 0;
+            distribution.push({ name: node.name, depth: node.depth || 0, radius: Math.round(r), isDir: node.isDirectory || false });
+            if (node.isDirectory) {
+                node.childDirectories.forEach(walk);
+                node.childFiles.forEach(walk);
+            }
+        })(root);
+        return distribution.sort((a, b) => b.radius - a.radius);
     },
     get fileMaterialInfo() {
         if (!fileInstancedMesh) return { exists: false };

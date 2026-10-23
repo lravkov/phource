@@ -8,7 +8,7 @@ count (count) per file, enabling both time-based animation (like gource)
 and loc-proportional file volumes (like city-blocks).
 
 Log format (pipe-delimited):
-    timestamp|username|action|filepath|loc|count
+    timestamp|username|action|filepath|loc|count|colour_hex|branch
 
 Where:
     timestamp  - unix timestamp of the commit
@@ -51,6 +51,9 @@ def parse_args():
                    help='Glob pattern to exclude (e.g. "*.json"). Can be repeated.')
     p.add_argument('--author-time', action='store_true',
                    help='Use author timestamp instead of committer timestamp')
+    p.add_argument('--branch', '-b', default=None,
+                   help='Git branch to log (e.g. "main", "feature/foo"). '
+                        'If omitted, logs all branches (HEAD).')
     return p.parse_args()
 
 
@@ -69,13 +72,14 @@ def matches_exclusions(filepath, patterns):
     return False
 
 
-def run_git_log(repo_path, author_time=False):
+def run_git_log(repo_path, branch=None, author_time=False):
     """
     Run git log with --numstat to get per-commit file changes with LOC data.
 
     Returns raw output string.
 
     Uses: git log --reverse --numstat --no-renames --pretty=format:user:%aN%n%ct
+    With --branch to limit to a specific branch.
     """
     time_format = '%at' if author_time else '%ct'
     cmd = [
@@ -85,6 +89,8 @@ def run_git_log(repo_path, author_time=False):
         '--no-renames',
         '--pretty=format:user:%aN%n' + time_format,
     ]
+    if branch:
+        cmd.extend(['--first-parent', branch])
     result = subprocess.run(cmd, cwd=repo_path, capture_output=True,
                             text=True, check=True)
     return result.stdout
@@ -209,17 +215,28 @@ def main():
                 if line and not line.startswith('#'):
                     args.exclude.append(line)
 
+    # Determine branch name for output
+    branch_name = args.branch
+    if branch_name is None:
+        # Get current branch name from git
+        try:
+            result = subprocess.run(['git', 'rev-parse', '--abbrev-ref', 'HEAD'],
+                                    cwd=repo_path, capture_output=True, text=True, check=True)
+            branch_name = result.stdout.strip() or 'main'
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            branch_name = 'main'
+    
     output_handle = None
     if args.output:
         output_handle = open(args.output, 'w')
 
     count = 0
     try:
-        raw = run_git_log(repo_path, args.author_time)
+        raw = run_git_log(repo_path, branch_name if args.branch else None, args.author_time)
         for timestamp, username, action, filepath, loc, file_count in \
                 parse_numstat_log(raw, args.exclude):
             colour = colour_hash(filepath)
-            line = f"{timestamp}|{username}|{action}|{filepath}|{loc}|{file_count}|{colour}"
+            line = f"{timestamp}|{username}|{action}|{filepath}|{loc}|{file_count}|{colour}|{branch_name}"
             if output_handle:
                 output_handle.write(line + '\n')
             else:
