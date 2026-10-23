@@ -18,7 +18,7 @@ phource fills both gaps in a single 3D visualization:
 - Time scrubbing and play/pause controls
 - Predictive camera zoom with 5-commit lookahead
 - Directory hover tooltips
-- Branch-aware side-by-side comparison (coming soon)
+- Multi-branch side-by-side comparison — load two branch logs to visualize them as two offset 3D tree universes in a shared timeline
 
 ## Quickstart
 
@@ -37,24 +37,33 @@ Generate a log from any git repository:
 python scripts/generate-log.py /path/to/your/repo
 ```
 
-This produces `public/phource.log` — a single file that phource reads on startup.
+### Comparing two branches
+
+Generate logs for each branch and place them in `public/`:
+
+```bash
+python scripts/generate-log.py /path/to/repo --output public/phource.log
+python scripts/generate-log.py /path/to/repo --branch feature-branch --output public/phource-branch.log
+```
+
+phource will automatically load both and display them side-by-side with dynamic offsetting based on each tree's bounding box.
 
 ## Screenshots
 
-![phource example](examples/phource-example.png)
+![phource branches mid-animation](examples/phource-branches-mid-animation.png)
 
-*Example: phource visualization showing file buildings with churn-proportional volumes and user beams.*
+*Mid-animation: two branch universes side-by-side with colored action beams (green=add, purple=modify, red=delete) and user tracking triangle. Main branch on the left, secondary branch on the right, offset dynamically based on tree size.*
 
-![phource example 2](examples/phource-example2.png)
+![phource branches final](examples/phource-branches-final.png)
 
-*The top-down monochrome view with colored action beams.*
+*Settled view after full simulation: files rendered as white 3D buildings with churn-proportional volumes. No overlaps between branch trees at any scrub position.*
 
 ## How it works
 
 phource reads an extended gource custom log format:
 
 ```
-timestamp|username|action|filepath|loc|count|colour_hex
+timestamp|username|action|filepath|loc|count|colour_hex|branch
 ```
 
 - `timestamp` — Unix epoch seconds
@@ -63,15 +72,22 @@ timestamp|username|action|filepath|loc|count|colour_hex
 - `filepath` — Full path
 - `loc` — Lines of code at that commit
 - `count` — Cumulative commit count for that file
+- `colour_hex` — Author's commit colour
+- `branch` — Git branch name (8th field, added in v2)
 
 Each file is rendered as a 3D box whose width/depth = `loc * count^(-p/2)` and height = `loc * count^p` (p=0.2). This means:
 - **Large files** appear wide
 - **Frequently-touched files** appear tall
 - **Volume = loc³** — a single metric combining size and churn
 
+### Branch comparison
+
+When two log files are loaded (`phource.log` for `main` and `phource-branch.log` for a secondary branch), each branch's files are namespaced under a top-level directory named after the branch (e.g., `feature-branch/src/file.js`). After the orbital layout positions both trees, `offsetBranchTrees()` computes each subtree's bounding box and offsets them horizontally side-by-side with padding, so both trees are always visible without overlap.
+
+The camera centers on the combined scene bounds, and the predictive zoom accounts for both trees' growth.
+
 ## Roadmap
 
-- [ ] Branch support (side-by-side git branch comparison)
 - [ ] GitHub PR integration (contextual file history during review)
 - [ ] Focus mode (highlight one user/team, dim others)
 
