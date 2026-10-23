@@ -28,8 +28,11 @@ const BEAM_OPACITY = 0.85;            // Brighter with additive blending
 const BEAM_PROPAGATION_TIME = 0.15;   // 15% of duration for fast path reveal
 const LERP_FACTOR = 0.12;
 const DIR_LAYOUT_LERP = 0.08;
-const USER_SPEED = 300.0;
-const USER_HEIGHT = 8.0;
+const USER_MAX_SPEED = 300.0;        // Max speed (units/sec) — gource-like
+const USER_ACCEL = 400.0;            // Acceleration toward target
+const USER_DAMPING = 0.92;           // Velocity damping (air resistance) — <1.0
+const USER_HEIGHT = 8.0;             // Base height above ground
+const USER_IDLE_DRIFT = 12.0;        // Max speed for idle drift when no actions
 const GLOBAL_SCALE = 0.3;
 
 // === Layout constants (static — no rotation) ===
@@ -1118,6 +1121,7 @@ function createUser(name) {
     });
     fillMat.depthWrite = false;
     const mesh = new THREE.Mesh(fillGeo, fillMat);
+    mesh.userData = { type: 'User', userName: name };
     mesh.renderOrder = 1;
     mesh.rotation.x = Math.PI / 2;
     scene.add(mesh);
@@ -1136,6 +1140,9 @@ function createUser(name) {
     const userNode = {
         name, mesh,
         pos: new THREE.Vector3(0, USER_HEIGHT, 0),
+        vel: new THREE.Vector3(0, 0, 0),
+        targetPos: new THREE.Vector3(0, USER_HEIGHT, 0),
+        idleAngle: Math.random() * Math.PI * 2,
         actions: [], lastActionTime: simTime,
         currentAlpha: 1, targetAlpha: 1, fadingOut: false,
         outlineMesh,
@@ -1152,6 +1159,7 @@ function getOrCreateUser(name) {
 
 function updateUserAvatars(dt) {
     const now = simTime;
+    const dtClamped = Math.min(dt, 0.1);
     users.forEach((userNode, name) => {
         const mesh = userNode.mesh;
         if (!mesh) return;
@@ -1170,72 +1178,109 @@ function updateUserAvatars(dt) {
             userNode.outlineMesh.material.needsUpdate = true;
         }
 
+        // Determine target position — smooth, flowing movement toward
+        // the most recently touched files, not a binary jump to batch centroid.
+        let targetX = 0, targetZ = 0, targetY = USER_HEIGHT;
+        let hasTarget = false;
+
         if (userNode.actions.length > 0) {
-            // Weighted average toward the files touched in this batch,
-            // with a small pull toward the root/center anchor. This keeps
-            // the committor migrating toward the files it's touching with
-            // the beams rather than sitting dead-center, while still
-            // preventing wild excursions when a batch spans many files
-            // spread across the entire tree (e.g., a fresh repo with all
-            // commits at the same timestamp = one giant batch).
-            const firstBatchTs = userNode.actions[0].batchTs;
-            const batchFiles = [];
-            for (let ai = 0; ai < userNode.actions.length; ai++) {
-                if (userNode.actions[ai].batchTs === firstBatchTs) {
-                    batchFiles.push(userNode.actions[ai].fileNode);
-                } else {
-                    break;  // Actions are in order; stop at next batch
-                }
-            }
-            // Limit to the most recent files so the target migrates toward
-            // where the user is actively touching files, rather than averaging
-            // all files in a potentially huge batch (which sits near the
-            // center of mass and makes the committor appear stuck at center).
+            // Use the most recent files (up to MAX_BATCH_FILES) to drive the
+            // target — this makes the committor migrate toward where it's
+            // actively working, not the center of mass of a huge batch.
             const MAX_BATCH_FILES = 15;
-            const effectiveFiles = batchFiles.slice(Math.max(0, batchFiles.length - MAX_BATCH_FILES));
-            // Compute average of file positions
-            const fileAvg = new THREE.Vector3(0, 0, 0);
+            const recentFiles = userNode.actions.slice(-MAX_BATCH_FILES);
+            let sumX = 0, sumY = 0, sumZ = 0;
             let count = 0;
-            for (const fileNode of effectiveFiles) {
+            for (const action of recentFiles) {
+                const fileNode = action.fileNode;
                 if (fileNode && fileNode.targetPos) {
                     const fileHeight = fileNode.buildingHeight || 0;
-                    fileAvg.x += fileNode.targetPos.x;
-                    fileAvg.y += USER_HEIGHT + fileHeight;
-                    fileAvg.z += fileNode.targetPos.z;
+                    sumX += fileNode.targetPos.x;
+                    sumY += USER_HEIGHT + fileHeight;
+                    sumZ += fileNode.targetPos.z;
                     count++;
                 }
             }
-            // Weighted average toward the files touched in this batch,
-            // with a small pull toward the root/center anchor. This keeps
-            // the committor migrating toward the files it's touching with
-            // the beams rather than sitting dead-center, while still
-            // preventing wild excursions when a batch spans many files
-            // spread across the entire tree (e.g., a fresh repo with all
-            // commits at the same timestamp = one giant batch).
-            const FILE_PULL = 0.95;  // 95% toward files, 5% toward center anchor
-            let avgPos;
             if (count > 0) {
-                fileAvg.x /= count;
-                fileAvg.y /= count;
-                fileAvg.z /= count;
-                avgPos = new THREE.Vector3(
-                    fileAvg.x * FILE_PULL + 0 * (1 - FILE_PULL),
-                    fileAvg.y * FILE_PULL + USER_HEIGHT * (1 - FILE_PULL),
-                    fileAvg.z * FILE_PULL + 0 * (1 - FILE_PULL)
-                );
-            } else {
-                avgPos = new THREE.Vector3(0, USER_HEIGHT, 0);
-            }
-            const dir = new THREE.Vector3().subVectors(avgPos, userNode.pos);
-            const dist = dir.length();
-            if (dist > 2) {
-                dir.normalize();
-                userNode.pos.add(dir.clone().multiplyScalar(dt * USER_SPEED));
-            } else {
-                // Reached average position — clear entire batch
-                for (let i = 0; i < batchFiles.length; i++) userNode.actions.shift();
+                // Smoothly interpolate target toward new file positions —
+                // prevents instant direction changes when a new batch arrives.
+                const fileAvgX = sumX / count;
+                const fileAvgY = sumY / count;
+                const fileAvgZ = sumZ / count;
+                const lerpT = THREE.MathUtils.lerp(0, 1, 0.05);  // 5% per frame
+                targetX = THREE.MathUtils.lerp(userNode.targetPos.x, fileAvgX, lerpT);
+                targetY = THREE.MathUtils.lerp(userNode.targetPos.y, fileAvgY, lerpT);
+                targetZ = THREE.MathUtils.lerp(userNode.targetPos.z, fileAvgZ, lerpT);
+                hasTarget = true;
             }
         }
+
+        if (hasTarget) {
+            // Smooth acceleration/deceleration: accelerate toward target,
+            // apply damping for natural momentum and easing.
+            const dx = targetX - userNode.pos.x;
+            const dy = targetY - userNode.pos.y;
+            const dz = targetZ - userNode.pos.z;
+            const distSq = dx * dx + dy * dy + dz * dz;
+            const dist = Math.sqrt(distSq);
+
+            // Accelerate toward target (proportional to distance, capped)
+            const accelFactor = Math.min(1.0, dist / 200.0);  // Start easing at 200 units
+            const accelScale = USER_ACCEL * accelFactor;
+            userNode.vel.x += (dx / Math.max(dist, 0.01)) * accelScale * dtClamped;
+            userNode.vel.y += (dy / Math.max(dist, 0.01)) * accelScale * dtClamped;
+            userNode.vel.z += (dz / Math.max(dist, 0.01)) * accelScale * dtClamped;
+
+            // Pop actions that are "reached" — pop the most recent action
+            // whose file is within 30 units of the user's position.
+            // This creates natural sequential movement through the batch.
+            const reachDist = 30.0;
+            for (let i = userNode.actions.length - 1; i >= 0; i--) {
+                const action = userNode.actions[i];
+                const fn = action.fileNode;
+                if (fn && fn.targetPos) {
+                    const fdx = fn.targetPos.x - userNode.pos.x;
+                    const fdz = fn.targetPos.z - userNode.pos.z;
+                    if (Math.sqrt(fdx * fdx + fdz * fdz) < reachDist) {
+                        userNode.actions.splice(i, 1);
+                    }
+                }
+            }
+        } else {
+            // Idle drift: gentle random walk to keep the committor looking alive
+            userNode.idleAngle += (Math.random() - 0.5) * 0.3;
+            const driftSpeed = USER_IDLE_DRIFT * (0.5 + 0.5 * Math.sin(now * 0.7 + userNode.idleAngle));
+            userNode.vel.x += Math.cos(userNode.idleAngle) * driftSpeed * dtClamped;
+            userNode.vel.z += Math.sin(userNode.idleAngle) * driftSpeed * dtClamped;
+            // Gentle Y bobbing during idle
+            userNode.vel.y += Math.sin(now * 1.3 + userNode.idleAngle) * 5.0 * dtClamped;
+        }
+
+        // Cap velocity at max speed
+        const speedSq = userNode.vel.x * userNode.vel.x + userNode.vel.y * userNode.vel.y + userNode.vel.z * userNode.vel.z;
+        const maxSpeedSq = USER_MAX_SPEED * USER_MAX_SPEED;
+        if (speedSq > maxSpeedSq) {
+            const scale = USER_MAX_SPEED / Math.sqrt(speedSq);
+            userNode.vel.x *= scale;
+            userNode.vel.y *= scale;
+            userNode.vel.z *= scale;
+        }
+
+        // Apply velocity damping (air resistance) for natural momentum
+        userNode.vel.x *= USER_DAMPING;
+        userNode.vel.y *= USER_DAMPING;
+        userNode.vel.z *= USER_DAMPING;
+
+        // Update position
+        userNode.pos.x += userNode.vel.x * dtClamped;
+        userNode.pos.y += userNode.vel.y * dtClamped;
+        userNode.pos.z += userNode.vel.z * dtClamped;
+
+        // Constrain Y to reasonable range
+        userNode.pos.y = Math.max(USER_HEIGHT * 0.3, Math.min(userNode.pos.y, USER_HEIGHT * 4));
+
+        // Update targetPos for smooth target interpolation
+        userNode.targetPos.copy(userNode.pos);
 
         mesh.position.copy(userNode.pos);
 
