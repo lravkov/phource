@@ -803,6 +803,7 @@ function initFileInstancedMesh() {
     fileInstancedMesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
     material.needsUpdate = true;
     scene.add(fileInstancedMesh);
+    fileInstancedMesh.userData = { type: 'Files', nodeData: null };
     pickableObjects.push(fileInstancedMesh);
     fileInstanceCount = 0;
     fileInstanceNodes.length = 0;
@@ -1897,11 +1898,13 @@ function positionCamera() {
     const w = bounds.maxX - bounds.minX || root.calculatedOuterWidth || 100;
     const d = bounds.maxZ - bounds.minZ || root.calculatedOuterDepth || 100;
     const camDistance = Math.max(w, d) * 0.8;
-    // Top-down view: camera directly above looking straight down (Ikeda monochrome aesthetic)
-    camera.position.set(0, camDistance, 0);
     // Center camera target on the midpoint of both branch trees
     const centerX = (bounds.minX + bounds.maxX) / 2;
     const centerZ = (bounds.minZ + bounds.maxZ) / 2;
+    // Top-down view: camera directly above looking straight down (Ikeda monochrome aesthetic)
+    // CRITICAL: camera X/Z must match centerX/centerZ to avoid a "teleport"
+    // jump when the animation loop's auto-fit code repositions the camera.
+    camera.position.set(centerX, camDistance, centerZ);
     controls.target.set(centerX, 0, centerZ);
     controls.update();
 }
@@ -2139,7 +2142,12 @@ async function init() {
         // Process initial commits WITHOUT beams (scrubbing mode prevents
         // beam creation and action pushing). Tree builds silently, then
         // fades in with cascade effect.
+        // IMPORTANT: Set _initialFadeComplete=false BEFORE rebuildLayout() and
+        // createInitialMeshes() so that createDirMesh and createRoadLines
+        // see the fade state and start at opacity 0 / scale 0.
         isScrubbing = true;
+        _initialFadeComplete = false;
+        _initialFadeStart = performance.now() + INITIAL_FADE_DELAY * 1000;
         while (commitIndex < logEntries.length &&
                logEntries[commitIndex].timestamp <= simTime) {
             processCommit(logEntries[commitIndex]);
@@ -2161,10 +2169,7 @@ async function init() {
         positionCamera();
         isScrubbing = false;
 
-        // Set up fog-lift fade-in — DON'T start simulation yet
-        _initialFadeStart = performance.now() + INITIAL_FADE_DELAY * 1000;
-        _initialFadeComplete = false;
-        simStarted = false;
+        // Simulation starts after fade completes (set in updateInitialFade)
 
         // Position user at root — appears first, before tree fades in
         if (users.size > 0) {
