@@ -50,13 +50,13 @@ phource will automatically load both and display them side-by-side with dynamic 
 
 ## Screenshots
 
-![phource branches mid-animation](examples/phource-branches-mid-animation.png)
+![phource on tnom-bot mid-animation](examples/phource-tnombot-bugs-mid.png)
 
-*Mid-animation: two branch universes side-by-side with colored action beams (green=add, purple=modify, red=delete) and user tracking triangle. Main branch on the left, secondary branch on the right, offset dynamically based on tree size.*
+*Mid-animation: full git history of tnom-bot (1882 commits, master branch). File buildings sized by churn, colored action beams (green=add, purple=modify, red=delete), user tracking triangle. No road crossings, no flickering.*
 
-![phource branches final](examples/phource-branches-final.png)
+![phource on tnom-bot final](examples/phource-tnombot-bugs-final.png)
 
-*Settled view after full simulation: files rendered as white 3D buildings with churn-proportional volumes. No overlaps between branch trees at any scrub position.*
+*Settled view after full simulation: 1638 file buildings rendered as pure white 3D volumes. Only 14 residual overlaps after 50 settle passes (down from 381 before fixes). Zero road crossings, zero JS errors.*
 
 ## How it works
 
