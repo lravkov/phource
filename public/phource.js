@@ -1914,14 +1914,17 @@ function cleanupScene() {
     fileInstanceNodes.length = 0;
 
     // Remove Directory sphere meshes from the scene
-    for (let i = scene.children.length - 1; i >= 0; i--) {
-        const child = scene.children[i];
-        if (child.userData && child.userData.type === 'Directory') {
-            scene.remove(child);
-            if (child.geometry) child.geometry.dispose();
-            if (child.material) child.material.dispose();
+    (function removeDirMeshes(node) {
+        if (node.isDirectory) {
+            if (node.mesh) {
+                scene.remove(node.mesh);
+                if (node.mesh.geometry) node.mesh.geometry.dispose();
+                if (node.mesh.material) node.mesh.material.dispose();
+                node.mesh = null;
+            }
+            node.childDirectories.forEach(removeDirMeshes);
         }
-    }
+    })(root);
     // Clear pickableObjects (will be rebuilt by createInitialMeshes)
     pickableObjects.length = 0;
 
@@ -2187,6 +2190,10 @@ function animate(timestamp) {
     }
 
     stepOrbitalSimulation(dt);
+    // Update tooltip every frame so it stays correct when camera
+    // orbits (OrbitControls) without mouse movement — raycast needs
+    // current camera matrix, not stale one from last onMouseMove
+    if (pickableObjects.length > 0) updateTooltip();
     if (renderer && scene && camera) renderer.render(scene, camera);
 
     // Use setTimeout for reliability in headless browsers (rAF is throttled)
