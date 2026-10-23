@@ -341,6 +341,38 @@ function pruneEmptyDirectories(dirNode) {
     }
 }
 
+function forceProcessPendingRemovals() {
+    // Immediately clean up all files in deferred-removal state (pendingRemoval=true)
+    // without waiting for fade-out animation. Called when simulation ends to
+    // ensure the constellation is fully pruned before settling.
+    if (!root || !fileInstancedMesh) return;
+    const toRemove = [];
+    (function walk(node) {
+        if (!node || !node.isDirectory) return;
+        node.childFiles.forEach(f => {
+            if (f.pendingRemoval) {
+                // Hide the instance immediately (skip fade-out)
+                if (f.instanceId !== undefined) {
+                    const id = f.instanceId;
+                    fileInstancedMesh.setMatrixAt(id, new THREE.Matrix4());
+                    fileInstancedMesh.instanceMatrix.needsUpdate = true;
+                    fileInstanceNodes[id] = null;
+                    f.instanceId = undefined;
+                }
+                toRemove.push(f.fullPath);
+            }
+        });
+        node.childDirectories.forEach(walk);
+    })(root);
+    toRemove.forEach(fp => {
+        // removeFileFromTree will also call pruneEmptyDirectories
+        removeFileFromTree(fp);
+    });
+    if (toRemove.length > 0) {
+        treeDirty = true;
+    }
+}
+
 // === Directory stats ===
 
 function calculateDirectoryStats(dirNode) {
@@ -1655,6 +1687,14 @@ function updateSimulation(dt) {
     if (commitIndex >= logEntries.length && !simPaused) {
         simPaused = true;
         updatePlayPauseButton();
+        // Force-remove any files still in deferred-removal state (pending
+        // fade-out) so the constellation is fully pruned BEFORE settling.
+        // Without this, settleCompleteLayout runs on a tree that still
+        // contains files being deleted and their empty parent directories.
+        forceProcessPendingRemovals();
+        // Rebuild layout after pruning so orbital positions and road lines
+        // reflect the final tree structure before physics settling
+        if (treeDirty) rebuildLayout();
         // Once all commits are processed, run thorough async physics settling
         // to find the natural tree shape (chunked to keep animation responsive)
         settleCompleteLayout();
