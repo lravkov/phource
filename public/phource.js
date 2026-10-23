@@ -337,6 +337,10 @@ function calculateNodeDimensions(node) {
         node.buildingHeight = Math.max(dims.height, MIN_VISIBLE_BUILDING_DIMENSION);
         node.buildingWidth = Math.max(dims.width, MIN_LAYOUT_DIMENSION);
         node.buildingDepth = Math.max(dims.depth, MIN_LAYOUT_DIMENSION);
+        // forceSize: used for layout spacing and visual scale. Derive from
+        // the file dimensions (already GLOBAL_SCALE'd) with a sane floor so
+        // small files are still visible and don't jitter during settling.
+        node.forceSize = Math.min(Math.max(Math.max(dims.width, dims.depth), 10), 100);
     }
 }
 
@@ -752,7 +756,12 @@ function rebuildLayout() {
         if (node.count > maxCommitCount) maxCommitCount = node.count;
     }
     cameraNeedsAutoFit = true;
-    forceSimRunning = true;
+    // Do NOT set forceSimRunning=true here — that flag should only be
+    // active during the post-simulation settling phase (settleCompleteLayout).
+    // Setting it here causes stepOrbitalSimulation to call resolveOverlaps
+    // every 30 frames DURING playback, jittering small files and potentially
+    // destabilizing file positions. The 10 resolveOverlaps passes already
+    // run inside calculateOrbitalLayout for the initial cleanup.
     treeDirty = false;
     createRoadLines();
 }
