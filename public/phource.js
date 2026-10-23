@@ -102,9 +102,16 @@ const ROAD_COLOR = 0xffffff;
 const ROAD_OPACITY = 0.4;
 const ROAD_LINE_WIDTH = 1;
 
+// === Initial fog-lift animation constants ===
+const INITIAL_FADE_DURATION = 2.5;   // Total fade-in time (seconds)
+const INITIAL_FADE_DELAY = 0.3;      // Delay before starting fade (seconds)
+
 // Scrubber state
 let isScrubbing = false;
 let simPaused = false;
+let _initialFadeStart = 0;
+let _initialFadeComplete = true;
+let _initialFadeMaxRadius = 1;
 let minTimestamp = 0;
 let maxTimestamp = 0;
 let scrubberElement = null;
@@ -884,15 +891,25 @@ function removeFileInstance(fileNode) {
 }
 
 function createDirMesh(dirNode) {
+    const fadeIn = !_initialFadeComplete;
     const geometry = new THREE.SphereGeometry(0.5, SPHERE_SEGMENTS, SPHERE_SEGMENTS / 2);
-    const material = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    const material = new THREE.MeshBasicMaterial({
+        color: 0xffffff,
+        transparent: true,
+        opacity: fadeIn ? 0 : 1,
+    });
     const mesh = new THREE.Mesh(geometry, material);
     mesh.userData = { type: 'Directory', nodeData: dirNode, depthLevel: dirNode.depth };
     scene.add(mesh);
     pickableObjects.push(mesh);
     dirNode.mesh = mesh;
+    dirNode.fadeAlpha = fadeIn ? 0 : 1;
     const s = DIR_SPHERE_RADIUS;
-    mesh.scale.set(s, s, s);
+    if (fadeIn) {
+        mesh.scale.set(0, 0, 0);  // Materialize from nothing during fog-lift
+    } else {
+        mesh.scale.set(s, s, s);
+    }
     mesh.position.set(dirNode.targetPos.x, s / 2, dirNode.targetPos.z);
 }
 
@@ -919,6 +936,12 @@ function updateDirMesh(dirNode, dt) {
     mesh.position.x = THREE.MathUtils.lerp(mesh.position.x, dirNode.targetPos.x, DIR_LAYOUT_LERP);
     mesh.position.z = THREE.MathUtils.lerp(mesh.position.z, dirNode.targetPos.z, DIR_LAYOUT_LERP);
     mesh.position.y = mesh.scale.y / 2;
+    // Opacity controlled by fadeAlpha (initial fade) or solid 1 (normal)
+    const alpha = dirNode.fadeAlpha !== undefined ? dirNode.fadeAlpha : 1;
+    if (mesh.material.transparent) {
+        mesh.material.opacity = alpha;
+        mesh.material.needsUpdate = true;
+    }
 }
 
 function updateAllMeshes(dt) {
@@ -928,6 +951,7 @@ function updateAllMeshes(dt) {
         if (node.isDirectory) {
             node.childDirectories.forEach(child => {
                 if (!child.mesh) createDirMesh(child);
+                else updateDirMesh(child, dt);
                 walk(child);
             });
             node.childFiles.forEach(f => {
@@ -943,6 +967,7 @@ function updateAllMeshes(dt) {
     });
     root.childDirectories.forEach(d => {
         if (!d.mesh) createDirMesh(d);
+        else updateDirMesh(d, dt);
         walk(d);
     });
 
@@ -1067,7 +1092,7 @@ function createRoadLines() {
             const material = new THREE.LineBasicMaterial({
                 color: ROAD_COLOR,
                 transparent: true,
-                opacity: ROAD_OPACITY,
+                opacity: _initialFadeComplete ? ROAD_OPACITY : 0,
                 depthWrite: false,
                 toneMapped: false,
             });
@@ -2046,8 +2071,8 @@ function resetToTime(targetTimestamp) {
         commitIndex++;
     }
 
-    // Rebuild layout — deterministic orbital placement with force-directed refinement
     rebuildLayout();
+    _initialFadeComplete = true;  // Instant appear on scrub (no fog-lift)
     createInitialMeshes();
     positionCamera();
     simStarted = true;
@@ -2111,7 +2136,10 @@ async function init() {
             maxTimestamp = logEntries[logEntries.length - 1].timestamp;
         }
 
-        // Process initial commits (build tree at sim start time)
+        // Process initial commits WITHOUT beams (scrubbing mode prevents
+        // beam creation and action pushing). Tree builds silently, then
+        // fades in with cascade effect.
+        isScrubbing = true;
         while (commitIndex < logEntries.length &&
                logEntries[commitIndex].timestamp <= simTime) {
             processCommit(logEntries[commitIndex]);
@@ -2119,9 +2147,41 @@ async function init() {
         }
 
         rebuildLayout();
+        _initialFadeMaxRadius = 0;
+        (function walk(n) {
+            if (n.targetPos) {
+                const dist = Math.sqrt(n.targetPos.x * n.targetPos.x + n.targetPos.z * n.targetPos.z);
+                if (dist > _initialFadeMaxRadius) _initialFadeMaxRadius = dist;
+            }
+            if (n.isDirectory) n.childDirectories.forEach(walk);
+        })(root);
+        _initialFadeMaxRadius = Math.max(_initialFadeMaxRadius, 1);
+
         createInitialMeshes();
         positionCamera();
-        simStarted = true;
+        isScrubbing = false;
+
+        // Set up fog-lift fade-in — DON'T start simulation yet
+        _initialFadeStart = performance.now() + INITIAL_FADE_DELAY * 1000;
+        _initialFadeComplete = false;
+        simStarted = false;
+
+        // Position user at root — appears first, before tree fades in
+        if (users.size > 0) {
+            const userNode = users.values().next().value;
+            userNode.pos.set(0, USER_HEIGHT, 0);
+            userNode.vel.set(0, 0, 0);
+            userNode.targetPos.copy(userNode.pos);
+            userNode.lastActionTime = simTime;
+            // Show user cone immediately
+            userNode.mesh.material.opacity = 1;
+            userNode.mesh.material.needsUpdate = true;
+            if (userNode.outlineMesh) {
+                userNode.outlineMesh.material.opacity = 1;
+                userNode.outlineMesh.material.needsUpdate = true;
+            }
+        }
+
         loadingElement.style.display = 'none';
         dateElement.style.display = 'block';
         if (scrubberElement) scrubberElement.parentElement.classList.remove('hidden');
@@ -2131,6 +2191,105 @@ async function init() {
         loadingElement.style.color = 'red';
     }
     animate();
+}
+
+// === Initial fog-lift animation ===
+// Fades in the initial tree state with a cascading wave effect:
+//   1. User cone appears instantly (0s)
+//   2. Road lines radiate from root (0.0-0.3s)
+//   3. Directory spheres materialize depth-by-depth (0.2-1.5s)
+//   4. File instances fade in depth-by-depth (0.8-2.5s)
+// All elements settle at full opacity when complete, then simulation starts.
+function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
+
+function updateInitialFade(dt) {
+    if (_initialFadeStart === 0) return;
+    const elapsed = (performance.now() - _initialFadeStart) / 1000;  // seconds
+    if (elapsed < 0) return;  // Still in delay period
+
+    const t = Math.min(elapsed / INITIAL_FADE_DURATION, 1.0);
+
+    // --- User cone: visible from the very start ---
+    if (users.size > 0) {
+        const userNode = users.values().next().value;
+        if (userNode.mesh) {
+            userNode.mesh.material.opacity = easeOutCubic(t);
+            userNode.mesh.material.needsUpdate = true;
+            if (userNode.outlineMesh) {
+                userNode.outlineMesh.material.opacity = easeOutCubic(t);
+                userNode.outlineMesh.material.needsUpdate = true;
+            }
+        }
+    }
+
+    // --- Road lines: fade in from root outward (0.0 - 0.3s) ---
+    const roadFadeEnd = 0.3;
+    const roadProgress = THREE.MathUtils.smoothstep(t / roadFadeEnd, 0, 1);
+    const roadAlpha = easeOutCubic(roadProgress) * ROAD_OPACITY;
+    roadLines.forEach(line => {
+        line.material.opacity = roadAlpha;
+        line.material.needsUpdate = true;
+    });
+
+    // --- Directory spheres + file instances: cascade by depth ---
+    // Directories: start at 0.2s, 0.15s per depth, 0.4s fade window
+    // Files: start at 0.4s, 0.15s per depth, 0.4s fade window
+    const dirStart = 0.2, fileStart = 0.4;
+    const perDepthDelay = 0.15;
+    const fadeWindow = 0.5;
+
+    function walk(node) {
+        if (node.isDirectory) {
+            // Directory sphere materialize + fade
+            const delay = dirStart + node.depth * perDepthDelay;
+            const progress = THREE.MathUtils.smoothstep((t - delay) / fadeWindow, 0, 1);
+            const alpha = easeOutCubic(Math.min(progress, 1.0));
+            node.fadeAlpha = alpha;
+            if (node.mesh) {
+                node.mesh.material.opacity = alpha;
+                node.mesh.material.needsUpdate = true;
+            }
+            // Files at this directory level fade in after their depth
+            node.childFiles.forEach(f => {
+                const fDelay = fileStart + f.depth * perDepthDelay;
+                const fProgress = THREE.MathUtils.smoothstep((t - fDelay) / fadeWindow, 0, 1);
+                f.targetAlpha = Math.min(fProgress, 1.0);
+            });
+            node.childDirectories.forEach(walk);
+        }
+    }
+    // Handle root-level files
+    root.childFiles.forEach(f => {
+        const fDelay = fileStart + f.depth * perDepthDelay;
+        const fProgress = THREE.MathUtils.smoothstep((t - fDelay) / fadeWindow, 0, 1);
+        f.targetAlpha = Math.min(fProgress, 1.0);
+    });
+    root.childDirectories.forEach(walk);
+
+    // --- Complete: start simulation ---
+    if (t >= 1.0) {
+        _initialFadeComplete = true;
+        simStarted = true;
+        // Final: set everything to full opacity
+        roadLines.forEach(line => {
+            line.material.opacity = ROAD_OPACITY;
+            line.material.needsUpdate = true;
+        });
+        (function finalize(node) {
+            node.fadeAlpha = 1;
+            if (node.mesh) {
+                node.mesh.material.opacity = 1;
+                node.mesh.material.needsUpdate = true;
+            }
+            node.targetAlpha = 1;
+            if (node.isDirectory) {
+                node.childDirectories.forEach(finalize);
+                node.childFiles.forEach(f => { f.targetAlpha = 1; });
+            }
+        })(root);
+        console.log('phource: initial fade complete — simulation starting');
+        settleCompleteLayout();
+    }
 }
 
 // === Main animation loop ===
@@ -2146,8 +2305,12 @@ function animate(timestamp) {
     frameCount++;
     dtSum += dt;
     if (simStarted && !isScrubbing && !simPaused) updateSimulation(dt);
-    // Update mesh animations continuously (needed for fade-in after scrubbing, and force layout settling)
-    if (root && simStarted) {
+    // Fog-lift phase: update mesh positions/scales while fading in, no sim
+    if (!_initialFadeComplete) {
+        if (root) updateAllMeshes(dt);
+        updateInitialFade(dt);
+    } else if (root && simStarted) {
+        // Normal simulation: update all meshes, beams, and user
         updateAllMeshes(dt);
         updateBeamActions(dt);
         updateUserAvatars(dt);
@@ -2368,6 +2531,7 @@ window.__phourceDebug = {
     },
     get forceCooling() { return forceCooling; },
     get forceSimRunning() { return forceSimRunning; },
+    get initialFadeComplete() { return _initialFadeComplete; },
     resolveAllOverlaps: function(passes) {
         for (let i = 0; i < (passes || 100); i++) resolveOverlaps();
         return window.__phourceDebug.overlapCount;
