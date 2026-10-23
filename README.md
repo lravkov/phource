@@ -50,11 +50,11 @@ phource will automatically load both and display them side-by-side with dynamic 
 
 ## Screenshots
 
-![phource on tnom-bot mid-animation](examples/phource-tnombot-bugs-mid.png)
+![phource mid-animation](examples/phource-tnombot-bugs-mid.png)
 
-*Mid-animation: full git history of tnom-bot (1882 commits, master branch). File buildings sized by churn, colored action beams (green=add, purple=modify, red=delete), user tracking triangle. No road crossings, no flickering.*
+*Mid-animation: full git history of a 1882-commit repository (master branch). File buildings sized by churn, colored action beams (green=add, purple=modify, red=delete), user tracking triangle. No road crossings, no flickering.*
 
-![phource on tnom-bot final](examples/phource-tnombot-bugs-final.png)
+![phource settled view](examples/phource-tnombot-bugs-final.png)
 
 *Settled view after full simulation: 1638 file buildings rendered as pure white 3D volumes. Only 14 residual overlaps after 50 settle passes (down from 381 before fixes). Zero road crossings, zero JS errors.*
 

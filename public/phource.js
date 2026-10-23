@@ -308,8 +308,37 @@ function removeFileFromTree(filepath) {
     const idx = currentDir.childFiles.findIndex(f => f.fullPath === filepath);
     if (idx !== -1) currentDir.childFiles.splice(idx, 1);
     fileMap.delete(filepath);
+    // Prune empty directories up the tree so the constellation reflects
+    // the actual repo structure at each commit. Without this, directories
+    // whose files have all been deleted remain as phantom spheres with
+    // dangling road lines in the constellation.
+    pruneEmptyDirectories(currentDir);
     treeDirty = true;
     return fileNode;
+}
+
+function pruneEmptyDirectories(dirNode) {
+    let dir = dirNode;
+    while (dir && dir !== root && dir.isDirectory) {
+        if (dir.childFiles.length === 0 && dir.childDirectories.length === 0) {
+            // Directory is empty — remove its mesh from the scene
+            if (dir.mesh) {
+                scene.remove(dir.mesh);
+                if (dir.mesh.geometry) dir.mesh.geometry.dispose();
+                if (dir.mesh.material) dir.mesh.material.dispose();
+                dir.mesh = null;
+            }
+            // Remove from parent's childDirectories
+            const parent = dir.parentDir;
+            if (parent) {
+                const dirIdx = parent.childDirectories.indexOf(dir);
+                if (dirIdx !== -1) parent.childDirectories.splice(dirIdx, 1);
+            }
+            dir = parent; // Continue checking up the tree
+        } else {
+            break; // Directory still has content, stop pruning
+        }
+    }
 }
 
 // === Directory stats ===
@@ -2074,6 +2103,22 @@ function resetToTime(targetTimestamp) {
         commitIndex++;
     }
 
+    // During scrubbing, immediately remove all deleted files from the tree.
+    // No need for fade-out animation — scrubbing is a discrete state reset.
+    // This ensures empty directories are pruned so the constellation
+    // reflects the actual repo structure at the scrubbed point in time.
+    (function removeDeletedFiles(node) {
+        if (!node || !node.isDirectory) return;
+        const toRemove = [];
+        node.childFiles.forEach(f => {
+            if (f.pendingRemoval || f.fadingOut) {
+                toRemove.push(f.fullPath);
+            }
+        });
+        toRemove.forEach(fp => removeFileFromTree(fp));
+        node.childDirectories.forEach(removeDeletedFiles);
+    })(root);
+
     rebuildLayout();
     _initialFadeComplete = true;  // Instant appear on scrub (no fog-lift)
     createInitialMeshes();
@@ -2154,8 +2199,21 @@ async function init() {
             commitIndex++;
         }
 
+        // Remove files deleted in the initial commit batch before building
+        // the layout, so the constellation reflects the actual repo structure.
+        (function removeDeletedFiles(node) {
+            if (!node || !node.isDirectory) return;
+            const toRemove = [];
+            node.childFiles.forEach(f => {
+                if (f.pendingRemoval || f.fadingOut) {
+                    toRemove.push(f.fullPath);
+                }
+            });
+            toRemove.forEach(fp => removeFileFromTree(fp));
+            node.childDirectories.forEach(removeDeletedFiles);
+        })(root);
+
         rebuildLayout();
-        _initialFadeMaxRadius = 0;
         (function walk(n) {
             if (n.targetPos) {
                 const dist = Math.sqrt(n.targetPos.x * n.targetPos.x + n.targetPos.z * n.targetPos.z);
