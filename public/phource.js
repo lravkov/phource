@@ -196,7 +196,7 @@ function createFileNode(name, fullPath, loc, count, colourHex, depth, actionType
         buildingWidth: dims.width, buildingDepth: dims.depth, buildingHeight: dims.height,
         mesh: null,
         targetPos: new THREE.Vector3(0, 0, 0),
-        forceSize: Math.min(Math.max(dims.width, dims.depth), 100),
+        forceSize: Math.min(Math.max(Math.max(dims.width, dims.depth), 10), 100),
         currentAlpha: 0, targetAlpha: 1, fadingOut: false, pendingRemoval: false,
         parentDir: null,
     };
@@ -1499,7 +1499,7 @@ function processCommit(entry) {
             fileNode.buildingWidth = dims.width;
             fileNode.buildingDepth = dims.depth;
             fileNode.buildingHeight = dims.height;
-            fileNode.forceSize = Math.min(Math.max(dims.width, dims.depth), 100);
+            fileNode.forceSize = Math.min(Math.max(Math.max(dims.width, dims.depth), 10), 100);
             // No treeDirty — forceSize updated directly, simulation handles it
         } else {
             fileNode = addFileToTree(filePath, entry.loc, entry.count, entry.colour, 'M');
