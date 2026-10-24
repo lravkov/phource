@@ -67,6 +67,9 @@ const fileInstanceNodes = []; // instanceId -> fileNode
 // Parent group for all orbital elements so they can be counter-rotated
 // against camera tilt, keeping planet rings horizontally aligned
 let horizonLockGroup = null;
+let _horizonLockCounter = 0;
+let _lastHorizonLockTilt = 0;
+let _lastHorizonLockAxis = [0, 0, 0];
 let debugTiltActive = false;
 const FILE_INSTANCES_CAPACITY = 3000;
 
@@ -2494,7 +2497,7 @@ function animate(timestamp) {
                     camera.position.z = centerZ;
                     camera.position.y = bounceY;
                     controls.target.set(centerX, 0, centerZ);
-                    controls.update();
+                    // controls.update() handled by the shared call below
                 }
             } else {
                 // Normal smooth lerp toward target
@@ -2510,7 +2513,7 @@ function animate(timestamp) {
                     camera.position.y = currentY + (targetCamY - currentY) * lerpFactor;
                 }
                 controls.target.set(centerX, 0, centerZ);
-                controls.update();
+                // controls.update() handled by the shared call below
             }
 
             // Clear flag only when simulation is paused/done and camera converged
@@ -2550,17 +2553,20 @@ function animate(timestamp) {
     // right-click orbit angle. Uses the camera's right-vector as the
     // rotation axis for correct behaviour at any azimuth.
     if (horizonLockGroup && camera) {
+        _horizonLockCounter++;
         const camDir = new THREE.Vector3();
         camera.getWorldDirection(camDir);
-        // Horizontal component length = sin(tilt from top-down)
         const horizLen = Math.sqrt(camDir.x * camDir.x + camDir.z * camDir.z);
         if (horizLen > 0.001) {
             const tilt = Math.asin(Math.min(1, horizLen));
-            // Camera's right vector: horizontal, perpendicular to view direction
             const right = new THREE.Vector3(camDir.z, 0, -camDir.x).normalize();
             horizonLockGroup.setRotationFromAxisAngle(right, -tilt);
+            _lastHorizonLockTilt = tilt;
+            _lastHorizonLockAxis = [right.x, right.y, right.z];
         } else {
-            horizonLockGroup.rotation.set(0, 0, 0);
+            horizonLockGroup.quaternion.identity();
+            _lastHorizonLockTilt = 0;
+            _lastHorizonLockAxis = [0, 0, 0];
         }
     }
 
@@ -2598,7 +2604,11 @@ window.__phourceDebug = {
     get horizonLock() {
         if (!horizonLockGroup) return null;
         const e = new THREE.Euler().setFromQuaternion(horizonLockGroup.quaternion, 'YXZ');
-        return { rotX: horizonLockGroup.rotation.x, rotY: horizonLockGroup.rotation.y, rotZ: horizonLockGroup.rotation.z, eulerX: e.x, eulerY: e.y };
+        return { 
+            rotX: horizonLockGroup.rotation.x, rotY: horizonLockGroup.rotation.y, rotZ: horizonLockGroup.rotation.z, 
+            eulerX: e.x, eulerY: e.y, 
+            counter: _horizonLockCounter, tilt: _lastHorizonLockTilt, axis: _lastHorizonLockAxis 
+        };
     },
     get overlapCount() {
         if (!root || !forceLayoutNodes || forceLayoutNodes.length < 2) return 0;
