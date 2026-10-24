@@ -495,15 +495,17 @@ function calculateOrbitalLayout(rootNode) {
 
             // Place files on a Fibonacci spiral around the directory sphere.
             // Each file advances by the golden angle (~137.5°) and steps
-            // outward radially — this creates a natural, organic distribution
-            // without the straight-line alignment artifacts of concentric rings.
+            // outward sub-linearly (sqrt) — this creates a natural, organic
+            // distribution that stays close to the directory node while
+            // still breaking up straight-line alignment. Large directories
+            // expand gently; small ones stay tight.
             const goldenAngle = Math.PI * (3 - Math.sqrt(5));
             for (let j = 0; j < sorted.length; j++) {
                 const file = sorted[j];
                 file.parentDir = node;
                 const fileSize = Math.max(file.buildingWidth, file.buildingDepth);
                 const angle = j * goldenAngle;
-                const spiralRadius = baseRadius + j * (MIN_FILE_GAP * 2) + fileSize / 2 + MIN_FILE_GAP;
+                const spiralRadius = baseRadius + Math.sqrt(j) * (MIN_FILE_GAP * 2) + fileSize / 2 + MIN_FILE_GAP;
                 file.targetPos = new THREE.Vector3(
                     anchorX + Math.cos(angle) * spiralRadius,
                     node.foundationHeight + file.buildingHeight / 2,
