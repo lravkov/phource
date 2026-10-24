@@ -63,6 +63,10 @@ const _beamOffsetMap = new Map();  // fullPath -> offset index (per-file groupin
 let fileInstancedMesh = null;
 let fileInstanceCount = 0;
 const fileInstanceNodes = []; // instanceId -> fileNode
+
+// Parent group for all orbital elements so they can be counter-rotated
+// against camera tilt, keeping planet rings horizontally aligned
+let horizonLockGroup = null;
 const FILE_INSTANCES_CAPACITY = 3000;
 
 let logEntries = [];
@@ -324,7 +328,7 @@ function pruneEmptyDirectories(dirNode) {
         if (dir.childFiles.length === 0 && dir.childDirectories.length === 0) {
             // Directory is empty — remove its mesh from the scene
             if (dir.mesh) {
-                scene.remove(dir.mesh);
+                horizonLockGroup.remove(dir.mesh);
                 if (dir.mesh.geometry) dir.mesh.geometry.dispose();
                 if (dir.mesh.material) dir.mesh.material.dispose();
                 dir.mesh = null;
@@ -845,7 +849,7 @@ function rebuildLayout() {
 // so that the shader's `vColor *= color` doesn't multiply by zeros.
 function initFileInstancedMesh() {
     if (fileInstancedMesh) {
-        scene.remove(fileInstancedMesh);
+        horizonLockGroup.remove(fileInstancedMesh);
         fileInstancedMesh.geometry.dispose();
         fileInstancedMesh.material.dispose();
         const pIndex = pickableObjects.indexOf(fileInstancedMesh);
@@ -864,7 +868,7 @@ function initFileInstancedMesh() {
     fileInstancedMesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(FILE_INSTANCES_CAPACITY * 3), 3);
     fileInstancedMesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
     material.needsUpdate = true;
-    scene.add(fileInstancedMesh);
+    horizonLockGroup.add(fileInstancedMesh);
     fileInstancedMesh.userData = { type: 'Files', nodeData: null };
     pickableObjects.push(fileInstancedMesh);
     fileInstanceCount = 0;
@@ -963,7 +967,7 @@ function createDirMesh(dirNode) {
     });
     const mesh = new THREE.Mesh(geometry, material);
     mesh.userData = { type: 'Directory', nodeData: dirNode, depthLevel: dirNode.depth };
-    scene.add(mesh);
+    horizonLockGroup.add(mesh);
     pickableObjects.push(mesh);
     dirNode.mesh = mesh;
     dirNode.fadeAlpha = fadeIn ? 0 : 1;
@@ -1136,7 +1140,7 @@ function createRoadLines() {
     roadLines.forEach(line => {
         if (line.geometry) line.geometry.dispose();
         if (line.material) line.material.dispose();
-        scene.remove(line);
+        horizonLockGroup.remove(line);
     });
     roadLines = [];
 
@@ -1161,7 +1165,7 @@ function createRoadLines() {
             });
             const line = new THREE.Line(geometry, material);
             line.userData = { parent: node, child: child };
-            scene.add(line);
+            horizonLockGroup.add(line);
             roadLines.push(line);
             walk(child);
         });
@@ -1212,7 +1216,7 @@ function createUser(name) {
     const mesh = new THREE.Mesh(fillGeo, fillMat);
     mesh.userData = { type: 'User', userName: name };
     mesh.renderOrder = 1;
-    scene.add(mesh);
+    horizonLockGroup.add(mesh);
 
     // White wireframe edges — slightly scaled outward so edges sit on the
     // silhouette and are always visible as wireframe lines
@@ -1378,7 +1382,7 @@ function updateUserAvatars(dt) {
         mesh.position.copy(userNode.pos);
 
         if (userNode.fadingOut && userNode.currentAlpha < 0.02) {
-            scene.remove(mesh);
+            horizonLockGroup.remove(mesh);
             mesh.geometry.dispose();
             mesh.material.dispose();
             if (userNode.edgesLines) {
@@ -1402,7 +1406,7 @@ function createBeamAction(userNode, fileNode, actionType) {
     const geometry = new THREE.BufferGeometry();
     const beam = new THREE.Line(geometry, material);
     beam.renderOrder = 0;  // Behind committor (renderOrder=1)
-    scene.add(beam);
+    horizonLockGroup.add(beam);
 
     // Glow sphere at file endpoint — emissive, additive for "impact" effect
     const glowSphere = new THREE.Mesh(
@@ -1413,7 +1417,7 @@ function createBeamAction(userNode, fileNode, actionType) {
         })
     );
     glowSphere.renderOrder = 2;
-    scene.add(glowSphere);
+    horizonLockGroup.add(glowSphere);
 
     // Store directory node references (not positions) so the beam path updates
     // dynamically each frame as the orbital layout settles.
@@ -1471,11 +1475,11 @@ function updateBeamActions(dt) {
         const ba = beamActions[i];
         ba.progress += dt / ba.duration;
         if (ba.progress >= 1.0) {
-            scene.remove(ba.beam);
+            horizonLockGroup.remove(ba.beam);
             ba.beam.geometry.dispose();
             ba.beam.material.dispose();
             if (ba.glowSphere) {
-                scene.remove(ba.glowSphere);
+                horizonLockGroup.remove(ba.glowSphere);
                 ba.glowSphere.geometry.dispose();
                 ba.glowSphere.material.dispose();
             }
@@ -1832,6 +1836,12 @@ function setupScene() {
     scene.background = new THREE.Color(0x000000);
     // Ikeda aesthetic: no fog — crisp mathematical precision in a pure void
 
+    // Group for orbital elements (files, directories, beams, user) so we
+    // can counter-rotate them against camera tilt to keep planet rings
+    // horizontally aligned regardless of right-click orbit angle
+    horizonLockGroup = new THREE.Object3D();
+    scene.add(horizonLockGroup);
+
     const aspect = window.innerWidth / window.innerHeight;
     camera = new THREE.PerspectiveCamera(75, aspect, 5, 500000);
 
@@ -2066,7 +2076,7 @@ function predictCameraZoom() {
 function cleanupScene() {
     // Dispose InstancedMesh for file spheres
     if (fileInstancedMesh) {
-        scene.remove(fileInstancedMesh);
+        horizonLockGroup.remove(fileInstancedMesh);
         fileInstancedMesh.geometry.dispose();
         fileInstancedMesh.material.dispose();
         const pIndex = pickableObjects.indexOf(fileInstancedMesh);
@@ -2080,7 +2090,7 @@ function cleanupScene() {
     (function removeDirMeshes(node) {
         if (node.isDirectory) {
             if (node.mesh) {
-                scene.remove(node.mesh);
+                horizonLockGroup.remove(node.mesh);
                 if (node.mesh.geometry) node.mesh.geometry.dispose();
                 if (node.mesh.material) node.mesh.material.dispose();
                 node.mesh = null;
@@ -2094,7 +2104,7 @@ function cleanupScene() {
     // Remove user meshes (including outline child meshes)
     users.forEach(userNode => {
         if (userNode.mesh) {
-            scene.remove(userNode.mesh);
+            horizonLockGroup.remove(userNode.mesh);
             // Traverse and dispose all children (outline mesh, etc.)
             userNode.mesh.traverse(child => {
                 if (child.geometry) child.geometry.dispose();
@@ -2114,7 +2124,7 @@ function cleanupScene() {
     // Remove beam action meshes
     beamActions.forEach(ba => {
         if (ba.beam) {
-            scene.remove(ba.beam);
+            horizonLockGroup.remove(ba.beam);
             if (ba.beam.geometry) ba.beam.geometry.dispose();
             if (ba.beam.material) {
                 if (Array.isArray(ba.beam.material)) {
@@ -2126,7 +2136,7 @@ function cleanupScene() {
         }
     });
     roadLines.forEach(line => {
-        scene.remove(line);
+        horizonLockGroup.remove(line);
         if (line.geometry) line.geometry.dispose();
         if (line.material) {
             if (Array.isArray(line.material)) {
@@ -2531,6 +2541,18 @@ function animate(timestamp) {
     // orbits (OrbitControls) without mouse movement — raycast needs
     // current camera matrix, not stale one from last onMouseMove
     if (pickableObjects.length > 0) updateTooltip();
+
+    // Counter-rotate orbital elements against camera vertical tilt so
+    // planet rings stay horizontally aligned regardless of right-click
+    // orbit angle. Ground plane stays fixed on scene.
+    // Camera at top-down (looking down, camDir.y=-1): rotation = 0 (no counter-rotation)
+    // Camera tilted forward: counter-rotates group to keep rings face-on
+    if (horizonLockGroup && camera) {
+        const camDir = new THREE.Vector3();
+        camera.getWorldDirection(camDir);
+        horizonLockGroup.rotation.x = -Math.asin(camDir.y) - Math.PI / 2;
+    }
+
     if (renderer && scene && camera) renderer.render(scene, camera);
 
     // Use setTimeout for reliability in headless browsers (rAF is throttled)
@@ -2545,7 +2567,15 @@ window.__phourceDebug = {
     get bounceState() { return { active: _bounceActive, targetY: _bounceTargetY, amplitude: _bounceAmplitude, startTime: _bounceStartTime, lastPredictY: _lastPredictY, cameraNeedsAutoFit, maxDirDepth: _maxDirDepthRemaining.length ? _maxDirDepthRemaining[Math.min(commitIndex, _maxDirDepthRemaining.length - 1)] : 0 }; },
     get sceneObjects() {
         if (!scene) return [];
-        return scene.children.map(c => c.userData ? c.userData.type + ':' + (c.userData.nodeData ? c.userData.nodeData.name : c.userData.userName || '?') : c.type);
+        const all = [];
+        // Include direct children and horizonLockGroup children (orbital elements)
+        scene.children.forEach(c => {
+            if (c.userData) all.push(c.userData.type + ':' + (c.userData.nodeData ? c.userData.nodeData.name : c.userData.userName || '?'));
+            if (c.children) c.children.forEach(child => {
+                if (child.userData) all.push(child.userData.type + ':' + (child.userData.nodeData ? child.userData.nodeData.name : child.userData.userName || '?'));
+            });
+        });
+        return all;
     },
     get rendererInfo() { return renderer ? { renderCalls: renderer.info.render.calls, triangles: renderer.info.render.triangles } : null; },
     get overlapCount() {
