@@ -2403,6 +2403,11 @@ function updateInitialFade(dt) {
         })(root);
         console.log('phource: initial fade complete — simulation starting');
         settleCompleteLayout();
+        // Suppress Disney bounce immediately after fade-in: the tree has just
+        // settled and the camera continues its existing smooth lerp (via
+        // cameraNeedsAutoFit) to the new bounds. No teleport, no bounce.
+        _cameraTargetY = null;
+        _lastBounceEndTime = performance.now() + BOUNCE_COOLDOWN;
     }
 }
 
