@@ -1950,6 +1950,17 @@ function setupScene() {
 function createInitialMeshes() {
     if (!root) return;
     initFileInstancedMesh();
+    // Zero out all file nodes' targetAlpha so they stay invisible until
+    // updateInitialFade gradually reveals them during the fade-in cascade.
+    // Without this, addFileInstance -> updateFileMesh lerps from 0 to targetAlpha=1,
+    // making files flash visible before the first frame of updateInitialFade.
+    if (!_initialFadeComplete) {
+        (function zeroTargetAlpha(node) {
+            if (!node || !node.isDirectory) return;
+            node.childFiles.forEach(f => { f.targetAlpha = 0; f.currentAlpha = 0; });
+            node.childDirectories.forEach(zeroTargetAlpha);
+        })(root);
+    }
     function walk(node) {
         if (node.isDirectory) {
             if (node.depth > 0 && !node.mesh) createDirMesh(node);
