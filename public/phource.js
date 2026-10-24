@@ -33,6 +33,7 @@ const USER_ACCEL = 400.0;            // Acceleration toward target
 const USER_DAMPING = 0.92;           // Velocity damping (air resistance) — <1.0
 const USER_HEIGHT = 8.0;             // Base height above ground
 const USER_IDLE_DRIFT = 12.0;        // Max speed for idle drift when no actions
+const USER_TUMBLE_SPEED = 0.4;       // Tumble rotation (rad/s) for wireframe tetrahedron
 const GLOBAL_SCALE = 0.3;
 
 // === Layout constants (static — no rotation) ===
@@ -1197,11 +1198,10 @@ const ACTION_COLOURS = {
 
 function createUser(name) {
     const r = 300 * GLOBAL_SCALE;
-    const h = 200 * GLOBAL_SCALE;
-    const segs = 6;
 
-    // Black fill cone (on top — covers beam origins so beams appear to emanate from behind)
-    const fillGeo = new THREE.ConeGeometry(r, h, segs);
+    // Black face fill — a solid tetrahedron (covers beam origins so beams
+    // appear to emanate from behind the committor)
+    const fillGeo = new THREE.TetrahedronGeometry(r, 0);
     const fillMat = new THREE.MeshBasicMaterial({
         color: 0x000000,
         transparent: true, opacity: 1, side: THREE.DoubleSide,
@@ -1210,19 +1210,19 @@ function createUser(name) {
     const mesh = new THREE.Mesh(fillGeo, fillMat);
     mesh.userData = { type: 'User', userName: name };
     mesh.renderOrder = 1;
-    mesh.rotation.x = Math.PI / 2;
     scene.add(mesh);
 
-    // White outline cone (slightly larger, BackSide so we see the outline edge)
-    const outlineGeo = new THREE.ConeGeometry(r * 1.1, h * 1.1, segs);
-    const outlineMat = new THREE.MeshBasicMaterial({
+    // White wireframe edges — slightly scaled outward so edges sit on the
+    // silhouette and are always visible as wireframe lines
+    const edgesGeo = new THREE.EdgesGeometry(fillGeo);
+    const edgesMat = new THREE.LineBasicMaterial({
         color: 0xffffff,
-        transparent: true, opacity: 1, side: THREE.BackSide,
+        transparent: true, opacity: 1,
     });
-    outlineMat.depthWrite = false;
-    const outlineMesh = new THREE.Mesh(outlineGeo, outlineMat);
-    outlineMesh.renderOrder = 1;
-    mesh.add(outlineMesh); // Child follows parent position/rotation
+    edgesMat.depthWrite = false;
+    const edgesLines = new THREE.LineSegments(edgesGeo, edgesMat);
+    edgesLines.renderOrder = 1;
+    mesh.add(edgesLines); // Child follows parent position/rotation
 
     const userNode = {
         name, mesh,
@@ -1232,7 +1232,7 @@ function createUser(name) {
         idleAngle: Math.random() * Math.PI * 2,
         actions: [], lastActionTime: simTime,
         currentAlpha: 1, targetAlpha: 1, fadingOut: false,
-        outlineMesh,
+        edgesLines,
     };
     users.set(name, userNode);
     return userNode;
@@ -1260,9 +1260,9 @@ function updateUserAvatars(dt) {
         userNode.currentAlpha = THREE.MathUtils.lerp(userNode.currentAlpha, userNode.targetAlpha, 0.1);
         mesh.material.opacity = userNode.currentAlpha;
         mesh.material.needsUpdate = true;
-        if (userNode.outlineMesh && userNode.outlineMesh.material) {
-            userNode.outlineMesh.material.opacity = userNode.currentAlpha;
-            userNode.outlineMesh.material.needsUpdate = true;
+        if (userNode.edgesLines && userNode.edgesLines.material) {
+            userNode.edgesLines.material.opacity = userNode.currentAlpha;
+            userNode.edgesLines.material.needsUpdate = true;
         }
 
         // Determine target position — smooth, flowing movement toward
@@ -1369,12 +1369,20 @@ function updateUserAvatars(dt) {
         // Update targetPos for smooth target interpolation
         userNode.targetPos.copy(userNode.pos);
 
+        // Slow tumble for the wireframe tetrahedron
+        mesh.rotation.x += USER_TUMBLE_SPEED * dtClamped;
+        mesh.rotation.y += USER_TUMBLE_SPEED * 0.7 * dtClamped;
+
         mesh.position.copy(userNode.pos);
 
         if (userNode.fadingOut && userNode.currentAlpha < 0.02) {
             scene.remove(mesh);
             mesh.geometry.dispose();
             mesh.material.dispose();
+            if (userNode.edgesLines) {
+                userNode.edgesLines.geometry.dispose();
+                userNode.edgesLines.material.dispose();
+            }
             users.delete(name);
         }
     });
@@ -2097,7 +2105,7 @@ function cleanupScene() {
                 }
             });
             userNode.mesh = null;
-            userNode.outlineMesh = null;
+            userNode.edgesLines = null;
         }
     });
 
@@ -2287,12 +2295,12 @@ async function init() {
             userNode.vel.set(0, 0, 0);
             userNode.targetPos.copy(userNode.pos);
             userNode.lastActionTime = simTime;
-            // Show user cone immediately
+            // Show user sprite immediately
             userNode.mesh.material.opacity = 1;
             userNode.mesh.material.needsUpdate = true;
-            if (userNode.outlineMesh) {
-                userNode.outlineMesh.material.opacity = 1;
-                userNode.outlineMesh.material.needsUpdate = true;
+            if (userNode.edgesLines) {
+                userNode.edgesLines.material.opacity = 1;
+                userNode.edgesLines.material.needsUpdate = true;
             }
         }
 
@@ -2329,9 +2337,9 @@ function updateInitialFade(dt) {
         if (userNode.mesh) {
             userNode.mesh.material.opacity = easeOutCubic(t);
             userNode.mesh.material.needsUpdate = true;
-            if (userNode.outlineMesh) {
-                userNode.outlineMesh.material.opacity = easeOutCubic(t);
-                userNode.outlineMesh.material.needsUpdate = true;
+            if (userNode.edgesLines) {
+                userNode.edgesLines.material.opacity = easeOutCubic(t);
+                userNode.edgesLines.material.needsUpdate = true;
             }
         }
     }
