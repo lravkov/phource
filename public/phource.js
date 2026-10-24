@@ -67,6 +67,7 @@ const fileInstanceNodes = []; // instanceId -> fileNode
 // Parent group for all orbital elements so they can be counter-rotated
 // against camera tilt, keeping planet rings horizontally aligned
 let horizonLockGroup = null;
+let debugTiltActive = false;
 const FILE_INSTANCES_CAPACITY = 3000;
 
 let logEntries = [];
@@ -926,7 +927,9 @@ function updateFileMesh(fileNode, dt) {
     }
     const matrix = new THREE.Matrix4();
     matrix.makeScale(fileNode.currentScale, fileNode.currentScale, fileNode.currentScale);
-    matrix.setPosition(fileNode.currentX, fileNode.currentScale / 2, fileNode.currentZ);
+    // Y = 0 for all files: keeps planet rings flat in the XZ plane so the
+    // horizon-lock counter-rotation keeps them horizontally aligned
+    matrix.setPosition(fileNode.currentX, 0, fileNode.currentZ);
     fileInstancedMesh.setMatrixAt(id, matrix);
     fileInstancedMesh.instanceMatrix.needsUpdate = true;
 
@@ -2454,7 +2457,7 @@ function animate(timestamp) {
         updateBeamActions(dt);
         updateUserAvatars(dt);
     }
-    if (cameraNeedsAutoFit) {
+    if (cameraNeedsAutoFit && !debugTiltActive) {
         // Skip auto-fit if user recently interacted with the camera
         if (performance.now() - lastUserInteraction < AUTO_FIT_COOLDOWN) {
             // Still set the flag so it fires again next frame after cooldown
@@ -2518,7 +2521,7 @@ function animate(timestamp) {
             }
         }
     }
-    if (controls) controls.update();
+    if (controls && !debugTiltActive) controls.update();
     updateTooltip();
 
     // Update scrubber position to reflect current simulation time
@@ -2543,14 +2546,22 @@ function animate(timestamp) {
     if (pickableObjects.length > 0) updateTooltip();
 
     // Counter-rotate orbital elements against camera vertical tilt so
-    // planet rings stay horizontally aligned regardless of right-click
-    // orbit angle. Ground plane stays fixed on scene.
-    // Camera at top-down (looking down, camDir.y=-1): rotation = 0 (no counter-rotation)
-    // Camera tilted forward: counter-rotates group to keep rings face-on
+    // planet rings stay horizontally aligned (face-on) regardless of
+    // right-click orbit angle. Uses the camera's right-vector as the
+    // rotation axis for correct behaviour at any azimuth.
     if (horizonLockGroup && camera) {
         const camDir = new THREE.Vector3();
         camera.getWorldDirection(camDir);
-        horizonLockGroup.rotation.x = -Math.asin(camDir.y) - Math.PI / 2;
+        // Horizontal component length = sin(tilt from top-down)
+        const horizLen = Math.sqrt(camDir.x * camDir.x + camDir.z * camDir.z);
+        if (horizLen > 0.001) {
+            const tilt = Math.asin(Math.min(1, horizLen));
+            // Camera's right vector: horizontal, perpendicular to view direction
+            const right = new THREE.Vector3(camDir.z, 0, -camDir.x).normalize();
+            horizonLockGroup.setRotationFromAxisAngle(right, -tilt);
+        } else {
+            horizonLockGroup.rotation.set(0, 0, 0);
+        }
     }
 
     if (renderer && scene && camera) renderer.render(scene, camera);
@@ -2578,6 +2589,17 @@ window.__phourceDebug = {
         return all;
     },
     get rendererInfo() { return renderer ? { renderCalls: renderer.info.render.calls, triangles: renderer.info.render.triangles } : null; },
+    get cameraDir() {
+        if (!camera) return null;
+        const d = new THREE.Vector3();
+        camera.getWorldDirection(d);
+        return { x: d.x, y: d.y, z: d.z };
+    },
+    get horizonLock() {
+        if (!horizonLockGroup) return null;
+        const e = new THREE.Euler().setFromQuaternion(horizonLockGroup.quaternion, 'YXZ');
+        return { rotX: horizonLockGroup.rotation.x, rotY: horizonLockGroup.rotation.y, rotZ: horizonLockGroup.rotation.z, eulerX: e.x, eulerY: e.y };
+    },
     get overlapCount() {
         if (!root || !forceLayoutNodes || forceLayoutNodes.length < 2) return 0;
         let overlaps = 0;
@@ -2703,6 +2725,27 @@ window.__phourceDebug = {
     settle: function() {
         settleCompleteLayout();
         return true;
+    },
+    setTilt: function(azimuthDeg, tiltDeg) {
+        if (!camera || !controls) return null;
+        const az = THREE.MathUtils.degToRad(azimuthDeg || 0);
+        const tilt = THREE.MathUtils.degToRad(tiltDeg || 0);
+        const centerX = window.__phourceDebug.controlTarget[0];
+        const centerZ = window.__phourceDebug.controlTarget[2];
+        const camPos = camera.position;
+        const dx = camPos.x - centerX, dy = camPos.y, dz = camPos.z - centerZ;
+        const radius = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        // Freeze controls so update() doesn't override our camera position
+        debugTiltActive = (tiltDeg !== 0 || azimuthDeg !== 0);
+        controls.enabled = !debugTiltActive;
+        camera.position.set(
+            centerX + radius * Math.sin(tilt) * Math.sin(az),
+            radius * Math.cos(tilt),
+            centerZ + radius * Math.sin(tilt) * Math.cos(az) * -1
+        );
+        camera.lookAt(centerX, 0, centerZ);
+        controls.target.set(centerX, 0, centerZ);
+        return { cameraDir: window.__phourceDebug.cameraDir, horizonLock: window.__phourceDebug.horizonLock };
     },
     beamDebug: function() {
         var result = { total: beamActions.length, beams: [] };
