@@ -983,7 +983,7 @@ function createDirMesh(dirNode) {
     } else {
         mesh.scale.set(s, s, s);
     }
-    mesh.position.set(dirNode.targetPos.x, s / 2, dirNode.targetPos.z);
+    mesh.position.set(dirNode.targetPos.x, 0, dirNode.targetPos.z);
 }
 
 function createGround(size) {
@@ -1008,7 +1008,7 @@ function updateDirMesh(dirNode, dt) {
     mesh.scale.z = THREE.MathUtils.lerp(mesh.scale.z, targetScale, DIR_LAYOUT_LERP);
     mesh.position.x = THREE.MathUtils.lerp(mesh.position.x, dirNode.targetPos.x, DIR_LAYOUT_LERP);
     mesh.position.z = THREE.MathUtils.lerp(mesh.position.z, dirNode.targetPos.z, DIR_LAYOUT_LERP);
-    mesh.position.y = mesh.scale.y / 2;
+    mesh.position.y = 0;
     // Opacity controlled by fadeAlpha (initial fade) or solid 1 (normal)
     const alpha = dirNode.fadeAlpha !== undefined ? dirNode.fadeAlpha : 1;
     if (mesh.material.transparent) {
@@ -1156,8 +1156,8 @@ function createRoadLines() {
         if (!node.isDirectory) return;
         node.childDirectories.forEach(child => {
             if (!child.targetPos) return;
-            const startY = DIR_SPHERE_RADIUS / 2 + 0.5;
-            const endY = DIR_SPHERE_RADIUS / 2 + 0.5;
+            const startY = 0;
+            const endY = 0;
             const geometry = new THREE.BufferGeometry().setFromPoints([
                 new THREE.Vector3(node.targetPos.x, startY, node.targetPos.z),
                 new THREE.Vector3(child.targetPos.x, endY, child.targetPos.z),
@@ -1188,10 +1188,10 @@ function updateRoadLines() {
         if (!parent || !child || !parent.targetPos || !child.targetPos) continue;
         const positions = line.geometry.attributes.position.array;
         positions[0] = parent.targetPos.x;
-        positions[1] = DIR_SPHERE_RADIUS / 2 + 0.5;
+        positions[1] = 0;
         positions[2] = parent.targetPos.z;
         positions[3] = child.targetPos.x;
-        positions[4] = DIR_SPHERE_RADIUS / 2 + 0.5;
+        positions[4] = 0;
         positions[5] = child.targetPos.z;
         line.geometry.attributes.position.needsUpdate = true;
     }
@@ -1475,7 +1475,7 @@ function createBeamAction(userNode, fileNode, actionType) {
 }
 
 function updateBeamActions(dt) {
-    const roadY = DIR_SPHERE_RADIUS / 2 + 0.5;
+    const roadY = 0;
     const propThreshold = BEAM_PROPAGATION_TIME;  // 15% of progress for fast appear
     for (let i = beamActions.length - 1; i >= 0; i--) {
         const ba = beamActions[i];
@@ -1877,7 +1877,7 @@ function setupScene() {
     });
 
     // Track user interaction to avoid overriding manual camera adjustments
-    ['pointerdown', 'wheel', 'touchstart'].forEach(evt => {
+    ['pointerdown', 'pointermove', 'wheel', 'touchstart', 'touchmove'].forEach(evt => {
         renderer.domElement.addEventListener(evt, () => {
             lastUserInteraction = performance.now();
         });
