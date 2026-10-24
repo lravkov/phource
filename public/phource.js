@@ -1197,7 +1197,7 @@ const ACTION_COLOURS = {
 };
 
 function createUser(name) {
-    const r = 300 * GLOBAL_SCALE;
+    const r = 800 * GLOBAL_SCALE;
 
     // Black face fill — a solid tetrahedron (covers beam origins so beams
     // appear to emanate from behind the committor)
