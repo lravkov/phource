@@ -1199,14 +1199,16 @@ const ACTION_COLOURS = {
 function createUser(name) {
     const r = 600 * GLOBAL_SCALE;
 
-    // Black face fill — a solid tetrahedron (covers beam origins so beams
-    // appear to emanate from behind the committor)
+    // Black face fill — solid tetrahedron (depthWrite true so beams can't
+    // show through; polygonOffset prevents z-fight with edges overlay;
+    // transparent kept for fade-in/out opacity animation)
     const fillGeo = new THREE.TetrahedronGeometry(r, 0);
     const fillMat = new THREE.MeshBasicMaterial({
         color: 0x000000,
         transparent: true, opacity: 1, side: THREE.DoubleSide,
+        polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1,
     });
-    fillMat.depthWrite = false;
+    fillMat.depthWrite = true;
     const mesh = new THREE.Mesh(fillGeo, fillMat);
     mesh.userData = { type: 'User', userName: name };
     mesh.renderOrder = 1;
