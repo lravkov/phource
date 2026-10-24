@@ -493,27 +493,21 @@ function calculateOrbitalLayout(rootNode) {
             const anchorX = node.targetPos.x;
             const anchorZ = node.targetPos.z;
 
-            // Place files on concentric rings around the directory sphere.
-            // Each ring holds as many files as its circumference allows.
-            // Largest files placed first (inner rings) for stability.
-            let ring = 0;
-            let placed = 0;
+            // Place files on a Fibonacci spiral around the directory sphere.
+            // Each file advances by the golden angle (~137.5°) and steps
+            // outward radially — this creates a natural, organic distribution
+            // without the straight-line alignment artifacts of concentric rings.
+            const goldenAngle = Math.PI * (3 - Math.sqrt(5));
             for (let j = 0; j < sorted.length; j++) {
                 const file = sorted[j];
                 file.parentDir = node;
                 const fileSize = Math.max(file.buildingWidth, file.buildingDepth);
-                const ringRadius = baseRadius + ring * (MIN_FILE_GAP * 2);
-                const capacity = Math.max(1, Math.floor((2 * Math.PI * ringRadius) / (MIN_FILE_GAP * 2)));
-                if (placed >= capacity) {
-                    ring++;
-                    placed = 0;
-                }
-                const angle = (placed / capacity) * Math.PI * 2;
-                const r = ringRadius + fileSize / 2 + MIN_FILE_GAP;
+                const angle = j * goldenAngle;
+                const spiralRadius = baseRadius + j * (MIN_FILE_GAP * 2) + fileSize / 2 + MIN_FILE_GAP;
                 file.targetPos = new THREE.Vector3(
-                    anchorX + Math.cos(angle) * r,
+                    anchorX + Math.cos(angle) * spiralRadius,
                     node.foundationHeight + file.buildingHeight / 2,
-                    anchorZ + Math.sin(angle) * r
+                    anchorZ + Math.sin(angle) * spiralRadius
                 );
                 file.orbitRadius = Math.sqrt(
                     file.targetPos.x ** 2 + file.targetPos.z ** 2
@@ -536,9 +530,9 @@ function calculateOrbitalLayout(rootNode) {
     computeSceneBounds();
     forceFrameCount = 0;
     // Minimal settle during sim playback — just enough to place nodes.
-    // Depth-layered rings keep directories on concentric circles;
-    // resolveOverlaps only pushes overlapping nodes apart along their axis,
-    // preserving the ring structure. No stepForceLayout needed.
+    // Spiral distribution gives organic initial placement;
+    // resolveOverlaps pushes overlapping nodes apart along their axis,
+    // preserving the cluster structure. No stepForceLayout needed.
     forceCooling = 1.0;
     for (let i = 0; i < 10; i++) resolveOverlaps();
     forceCooling = 0.0;
