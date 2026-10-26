@@ -84,7 +84,7 @@ let maxCommitCount = 1;
 let cameraNeedsAutoFit = false;
 let lastUserInteraction = 0;
 // Auto-fit only when user hasn't interacted for 2 seconds
-const AUTO_FIT_COOLDOWN = 2000;
+const AUTO_FIT_COOLDOWN = 5000;
 let dtSum = 0;
 let frameCount = 0;
 let _timeSinceLastCommit = 0;
@@ -1877,7 +1877,7 @@ function setupScene() {
     });
 
     // Track user interaction to avoid overriding manual camera adjustments
-    ['pointerdown', 'pointermove', 'wheel', 'touchstart', 'touchmove'].forEach(evt => {
+    ['pointerdown', 'pointermove', 'pointerup', 'wheel', 'touchstart', 'touchmove', 'touchend'].forEach(evt => {
         renderer.domElement.addEventListener(evt, () => {
             lastUserInteraction = performance.now();
         });
