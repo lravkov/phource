@@ -29,3 +29,19 @@ app.listen(port, () => {
 app.on('error', (error) => {
     console.error('Server error:', error);
 });
+
+app.get('/debug-data', (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+    res.sendFile(path.join(__dirname, 'public', 'debug-data.json'));
+});
+
+app.post('/debug', express.raw({type: 'application/json', limit: '1mb'}), (req, res) => {
+    try {
+        require('fs').writeFileSync(path.join(__dirname, 'public', 'debug-data.json'), req.body);
+        res.setHeader('Content-Type', 'application/json');
+        res.send('{"status":"ok"}');
+    } catch(e) {
+        res.status(500).send('{"error":"' + e.message + '"}');
+    }
+});
+

@@ -79,6 +79,9 @@ const _worldUpTemp = new THREE.Vector3(0, 1, 0);
 const _basisMatrix = new THREE.Matrix4();
 const _quatTemp = new THREE.Quaternion();
 const _90degX = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2);
+let _inPlaneRot = new THREE.Quaternion();  // In-plane rotation to align planets' principal direction with horizontal
+let _inPlaneAngle = 0;                     // Principal angle from PCA (radians)
+const _inPlaneRotAxis = new THREE.Vector3(0, 1, 0);  // Rotate around group's local Y
 const FILE_INSTANCES_CAPACITY = 3000;
 
 let logEntries = [];
@@ -2551,6 +2554,26 @@ function animate(timestamp) {
     }
 
     stepOrbitalSimulation(dt);
+    // Periodically recompute the in-plane rotation angle via PCA on file positions.
+    // This aligns the planets' principal spread direction with camRight (horizontal),
+    // so a 2D arrangement does not appear sloped/vertical after the counter-rotation.
+    if (_horizonLockCounter % 30 === 0 && forceLayoutNodes && forceLayoutNodes.length > 2) {
+        let cx = 0, cz = 0;
+        const n = forceLayoutNodes.length;
+        for (let i = 0; i < n; i++) {
+            const p = forceLayoutNodes[i].targetPos;
+            cx += p.x; cz += p.z;
+        }
+        cx /= n; cz /= n;
+        let cxx = 0, cxz = 0, czz = 0;
+        for (let i = 0; i < n; i++) {
+            const p = forceLayoutNodes[i].targetPos;
+            const dx = p.x - cx, dz = p.z - cz;
+            cxx += dx * dx; cxz += dx * dz; czz += dz * dz;
+        }
+        _inPlaneAngle = 0.5 * Math.atan2(2 * cxz, cxx - czz);
+        _inPlaneRot.setFromAxisAngle(_inPlaneRotAxis, -_inPlaneAngle);
+    }
     // Update tooltip every frame so it stays correct when camera
     // orbits (OrbitControls) without mouse movement — raycast needs
     // current camera matrix, not stale one from last onMouseMove
@@ -2574,12 +2597,18 @@ function animate(timestamp) {
             // After this: X → camRight (horizontal), Y → -camDir (toward camera), Z → -camUp (vertical).
             horizonLockGroup.quaternion.copy( camera.quaternion );
             horizonLockGroup.quaternion.multiply( _90degX );
+            // Apply in-plane rotation around the plane normal (local Y) to align
+            // the planets' principal direction with camRight (horizontal).
+            // Without this, planets arranged along Z appear vertical.
+            horizonLockGroup.quaternion.multiply( _inPlaneRot );
             _lastHorizonLockTilt = tilt;
             // Compute camRight for debug: worldUp × camDir (not camDir × worldUp!)
             _camRightTemp.crossVectors( _worldUpTemp, _camDirTemp ).normalize();
             _lastHorizonLockAxis = [ _camRightTemp.x, _camRightTemp.y, _camRightTemp.z ];
         } else {
-            horizonLockGroup.quaternion.identity();
+            // Top-down view: orbital plane is already face-on.
+            // Just apply the in-plane rotation to align principal direction with horizontal.
+            horizonLockGroup.quaternion.copy( _inPlaneRot );
             _lastHorizonLockTilt = 0;
             _lastHorizonLockAxis = [0, 0, 0];
         }
