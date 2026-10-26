@@ -78,6 +78,7 @@ const _camUpTemp = new THREE.Vector3();
 const _worldUpTemp = new THREE.Vector3(0, 1, 0);
 const _basisMatrix = new THREE.Matrix4();
 const _quatTemp = new THREE.Quaternion();
+const _90degX = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2);
 const FILE_INSTANCES_CAPACITY = 3000;
 
 let logEntries = [];
@@ -2567,16 +2568,15 @@ function animate(timestamp) {
         const horizLen = Math.sqrt( _camDirTemp.x * _camDirTemp.x + _camDirTemp.z * _camDirTemp.z );
         if (horizLen > 0.001) {
             const tilt = Math.asin( Math.min(1, horizLen) );
-            // Camera right = camDir × worldUp (points to camera's right in world space)
-            _camRightTemp.crossVectors( _camDirTemp, _worldUpTemp ).normalize();
-            // Camera up = right × camDir (perpendicular to both)
-            _camUpTemp.crossVectors( _camRightTemp, _camDirTemp ).normalize();
-            // Build rotation: group X → camRight, group Y → -camDir (toward camera), group Z → -camUp
-            // (right-handed: camRight × (-camDir) = -camUp ✓)
-            _basisMatrix.makeBasis( _camRightTemp, _camDirTemp.clone().negate(), _camUpTemp.clone().negate() );
-            _quatTemp.setFromRotationMatrix( _basisMatrix );
-            horizonLockGroup.quaternion.copy( _quatTemp );
+            // Use the camera's own quaternion, then swap Y↔Z (rotate +90° around X)
+            // so the group's Y (plane normal) follows the camera's -Z (forward),
+            // and the group's X (planets' horizontal arrangement) follows the camera's X (right).
+            // After this: X → camRight (horizontal), Y → -camDir (toward camera), Z → -camUp (vertical).
+            horizonLockGroup.quaternion.copy( camera.quaternion );
+            horizonLockGroup.quaternion.multiply( _90degX );
             _lastHorizonLockTilt = tilt;
+            // Compute camRight for debug: worldUp × camDir (not camDir × worldUp!)
+            _camRightTemp.crossVectors( _worldUpTemp, _camDirTemp ).normalize();
             _lastHorizonLockAxis = [ _camRightTemp.x, _camRightTemp.y, _camRightTemp.z ];
         } else {
             horizonLockGroup.quaternion.identity();
