@@ -65,12 +65,19 @@ let fileInstanceCount = 0;
 const fileInstanceNodes = []; // instanceId -> fileNode
 
 // Parent group for all orbital elements so they can be counter-rotated
-// against camera tilt, keeping planet rings horizontally aligned
+// against camera tilt/azimuth, keeping planet rings horizontally aligned
 let horizonLockGroup = null;
 let _horizonLockCounter = 0;
 let _lastHorizonLockTilt = 0;
 let _lastHorizonLockAxis = [0, 0, 0];
 let debugTiltActive = false;
+// Reusable temporaries for horizon-lock counter-rotation
+const _camDirTemp = new THREE.Vector3();
+const _camRightTemp = new THREE.Vector3();
+const _camUpTemp = new THREE.Vector3();
+const _worldUpTemp = new THREE.Vector3(0, 1, 0);
+const _basisMatrix = new THREE.Matrix4();
+const _quatTemp = new THREE.Quaternion();
 const FILE_INSTANCES_CAPACITY = 3000;
 
 let logEntries = [];
@@ -2548,21 +2555,29 @@ function animate(timestamp) {
     // current camera matrix, not stale one from last onMouseMove
     if (pickableObjects.length > 0) updateTooltip();
 
-    // Counter-rotate orbital elements against camera vertical tilt so
-    // planet rings stay horizontally aligned (face-on) regardless of
-    // right-click orbit angle. Uses the camera's right-vector as the
-    // rotation axis for correct behaviour at any azimuth.
+    // Counter-rotate orbital elements against the camera so that the orbital
+    // plane stays face-on (normal → camera) AND the planets' horizontal
+    // arrangement always aligns with the camera's right vector, regardless
+    // of camera azimuth (yaw) or tilt (pitch).
+    // Uses a full basis matrix: group-local X → camRight, Y → -camDir,
+    // Z → -camUp — a complete rotation matching the camera's view frame.
     if (horizonLockGroup && camera) {
         _horizonLockCounter++;
-        const camDir = new THREE.Vector3();
-        camera.getWorldDirection(camDir);
-        const horizLen = Math.sqrt(camDir.x * camDir.x + camDir.z * camDir.z);
+        camera.getWorldDirection( _camDirTemp );
+        const horizLen = Math.sqrt( _camDirTemp.x * _camDirTemp.x + _camDirTemp.z * _camDirTemp.z );
         if (horizLen > 0.001) {
-            const tilt = Math.asin(Math.min(1, horizLen));
-            const right = new THREE.Vector3(camDir.z, 0, -camDir.x).normalize();
-            horizonLockGroup.setRotationFromAxisAngle(right, -tilt);
+            const tilt = Math.asin( Math.min(1, horizLen) );
+            // Camera right = camDir × worldUp (points to camera's right in world space)
+            _camRightTemp.crossVectors( _camDirTemp, _worldUpTemp ).normalize();
+            // Camera up = right × camDir (perpendicular to both)
+            _camUpTemp.crossVectors( _camRightTemp, _camDirTemp ).normalize();
+            // Build rotation: group X → camRight, group Y → -camDir (toward camera), group Z → -camUp
+            // (right-handed: camRight × (-camDir) = -camUp ✓)
+            _basisMatrix.makeBasis( _camRightTemp, _camDirTemp.clone().negate(), _camUpTemp.clone().negate() );
+            _quatTemp.setFromRotationMatrix( _basisMatrix );
+            horizonLockGroup.quaternion.copy( _quatTemp );
             _lastHorizonLockTilt = tilt;
-            _lastHorizonLockAxis = [right.x, right.y, right.z];
+            _lastHorizonLockAxis = [ _camRightTemp.x, _camRightTemp.y, _camRightTemp.z ];
         } else {
             horizonLockGroup.quaternion.identity();
             _lastHorizonLockTilt = 0;
