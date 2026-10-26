@@ -2651,7 +2651,8 @@ window.__phourceDebug = {
         return { 
             rotX: horizonLockGroup.rotation.x, rotY: horizonLockGroup.rotation.y, rotZ: horizonLockGroup.rotation.z, 
             eulerX: e.x, eulerY: e.y, 
-            counter: _horizonLockCounter, tilt: _lastHorizonLockTilt, axis: _lastHorizonLockAxis 
+            counter: _horizonLockCounter, tilt: _lastHorizonLockTilt, axis: _lastHorizonLockAxis,
+            inPlaneAngle: _inPlaneAngle ? THREE.MathUtils.radToDeg(_inPlaneAngle) : 0
         };
     },
     get overlapCount() {
