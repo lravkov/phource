@@ -63,14 +63,6 @@ const _beamOffsetMap = new Map();  // fullPath -> offset index (per-file groupin
 let fileInstancedMesh = null;
 let fileInstanceCount = 0;
 const fileInstanceNodes = []; // instanceId -> fileNode
-
-// Parent group for all orbital elements so they can be counter-rotated
-// against camera tilt, keeping planet rings horizontally aligned
-let horizonLockGroup = null;
-let _horizonLockCounter = 0;
-let _lastHorizonLockTilt = 0;
-let _lastHorizonLockAxis = [0, 0, 0];
-let debugTiltActive = false;
 const FILE_INSTANCES_CAPACITY = 3000;
 
 let logEntries = [];
@@ -332,7 +324,7 @@ function pruneEmptyDirectories(dirNode) {
         if (dir.childFiles.length === 0 && dir.childDirectories.length === 0) {
             // Directory is empty — remove its mesh from the scene
             if (dir.mesh) {
-                horizonLockGroup.remove(dir.mesh);
+                scene.remove(dir.mesh);
                 if (dir.mesh.geometry) dir.mesh.geometry.dispose();
                 if (dir.mesh.material) dir.mesh.material.dispose();
                 dir.mesh = null;
@@ -853,7 +845,7 @@ function rebuildLayout() {
 // so that the shader's `vColor *= color` doesn't multiply by zeros.
 function initFileInstancedMesh() {
     if (fileInstancedMesh) {
-        horizonLockGroup.remove(fileInstancedMesh);
+        scene.remove(fileInstancedMesh);
         fileInstancedMesh.geometry.dispose();
         fileInstancedMesh.material.dispose();
         const pIndex = pickableObjects.indexOf(fileInstancedMesh);
@@ -872,7 +864,7 @@ function initFileInstancedMesh() {
     fileInstancedMesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(FILE_INSTANCES_CAPACITY * 3), 3);
     fileInstancedMesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
     material.needsUpdate = true;
-    horizonLockGroup.add(fileInstancedMesh);
+    scene.add(fileInstancedMesh);
     fileInstancedMesh.userData = { type: 'Files', nodeData: null };
     pickableObjects.push(fileInstancedMesh);
     fileInstanceCount = 0;
@@ -930,9 +922,7 @@ function updateFileMesh(fileNode, dt) {
     }
     const matrix = new THREE.Matrix4();
     matrix.makeScale(fileNode.currentScale, fileNode.currentScale, fileNode.currentScale);
-    // Y = 0 for all files: keeps planet rings flat in the XZ plane so the
-    // horizon-lock counter-rotation keeps them horizontally aligned
-    matrix.setPosition(fileNode.currentX, 0, fileNode.currentZ);
+    matrix.setPosition(fileNode.currentX, fileNode.currentScale / 2, fileNode.currentZ);
     fileInstancedMesh.setMatrixAt(id, matrix);
     fileInstancedMesh.instanceMatrix.needsUpdate = true;
 
@@ -973,7 +963,7 @@ function createDirMesh(dirNode) {
     });
     const mesh = new THREE.Mesh(geometry, material);
     mesh.userData = { type: 'Directory', nodeData: dirNode, depthLevel: dirNode.depth };
-    horizonLockGroup.add(mesh);
+    scene.add(mesh);
     pickableObjects.push(mesh);
     dirNode.mesh = mesh;
     dirNode.fadeAlpha = fadeIn ? 0 : 1;
@@ -983,7 +973,7 @@ function createDirMesh(dirNode) {
     } else {
         mesh.scale.set(s, s, s);
     }
-    mesh.position.set(dirNode.targetPos.x, 0, dirNode.targetPos.z);
+    mesh.position.set(dirNode.targetPos.x, s / 2, dirNode.targetPos.z);
 }
 
 function createGround(size) {
@@ -1008,7 +998,7 @@ function updateDirMesh(dirNode, dt) {
     mesh.scale.z = THREE.MathUtils.lerp(mesh.scale.z, targetScale, DIR_LAYOUT_LERP);
     mesh.position.x = THREE.MathUtils.lerp(mesh.position.x, dirNode.targetPos.x, DIR_LAYOUT_LERP);
     mesh.position.z = THREE.MathUtils.lerp(mesh.position.z, dirNode.targetPos.z, DIR_LAYOUT_LERP);
-    mesh.position.y = 0;
+    mesh.position.y = mesh.scale.y / 2;
     // Opacity controlled by fadeAlpha (initial fade) or solid 1 (normal)
     const alpha = dirNode.fadeAlpha !== undefined ? dirNode.fadeAlpha : 1;
     if (mesh.material.transparent) {
@@ -1146,7 +1136,7 @@ function createRoadLines() {
     roadLines.forEach(line => {
         if (line.geometry) line.geometry.dispose();
         if (line.material) line.material.dispose();
-        horizonLockGroup.remove(line);
+        scene.remove(line);
     });
     roadLines = [];
 
@@ -1156,8 +1146,8 @@ function createRoadLines() {
         if (!node.isDirectory) return;
         node.childDirectories.forEach(child => {
             if (!child.targetPos) return;
-            const startY = 0;
-            const endY = 0;
+            const startY = DIR_SPHERE_RADIUS / 2 + 0.5;
+            const endY = DIR_SPHERE_RADIUS / 2 + 0.5;
             const geometry = new THREE.BufferGeometry().setFromPoints([
                 new THREE.Vector3(node.targetPos.x, startY, node.targetPos.z),
                 new THREE.Vector3(child.targetPos.x, endY, child.targetPos.z),
@@ -1171,7 +1161,7 @@ function createRoadLines() {
             });
             const line = new THREE.Line(geometry, material);
             line.userData = { parent: node, child: child };
-            horizonLockGroup.add(line);
+            scene.add(line);
             roadLines.push(line);
             walk(child);
         });
@@ -1188,10 +1178,10 @@ function updateRoadLines() {
         if (!parent || !child || !parent.targetPos || !child.targetPos) continue;
         const positions = line.geometry.attributes.position.array;
         positions[0] = parent.targetPos.x;
-        positions[1] = 0;
+        positions[1] = DIR_SPHERE_RADIUS / 2 + 0.5;
         positions[2] = parent.targetPos.z;
         positions[3] = child.targetPos.x;
-        positions[4] = 0;
+        positions[4] = DIR_SPHERE_RADIUS / 2 + 0.5;
         positions[5] = child.targetPos.z;
         line.geometry.attributes.position.needsUpdate = true;
     }
@@ -1222,7 +1212,7 @@ function createUser(name) {
     const mesh = new THREE.Mesh(fillGeo, fillMat);
     mesh.userData = { type: 'User', userName: name };
     mesh.renderOrder = 1;
-    horizonLockGroup.add(mesh);
+    scene.add(mesh);
 
     // White wireframe edges — slightly scaled outward so edges sit on the
     // silhouette and are always visible as wireframe lines
@@ -1388,7 +1378,7 @@ function updateUserAvatars(dt) {
         mesh.position.copy(userNode.pos);
 
         if (userNode.fadingOut && userNode.currentAlpha < 0.02) {
-            horizonLockGroup.remove(mesh);
+            scene.remove(mesh);
             mesh.geometry.dispose();
             mesh.material.dispose();
             if (userNode.edgesLines) {
@@ -1412,7 +1402,7 @@ function createBeamAction(userNode, fileNode, actionType) {
     const geometry = new THREE.BufferGeometry();
     const beam = new THREE.Line(geometry, material);
     beam.renderOrder = 0;  // Behind committor (renderOrder=1)
-    horizonLockGroup.add(beam);
+    scene.add(beam);
 
     // Glow sphere at file endpoint — emissive, additive for "impact" effect
     const glowSphere = new THREE.Mesh(
@@ -1423,7 +1413,7 @@ function createBeamAction(userNode, fileNode, actionType) {
         })
     );
     glowSphere.renderOrder = 2;
-    horizonLockGroup.add(glowSphere);
+    scene.add(glowSphere);
 
     // Store directory node references (not positions) so the beam path updates
     // dynamically each frame as the orbital layout settles.
@@ -1475,17 +1465,17 @@ function createBeamAction(userNode, fileNode, actionType) {
 }
 
 function updateBeamActions(dt) {
-    const roadY = 0;
+    const roadY = DIR_SPHERE_RADIUS / 2 + 0.5;
     const propThreshold = BEAM_PROPAGATION_TIME;  // 15% of progress for fast appear
     for (let i = beamActions.length - 1; i >= 0; i--) {
         const ba = beamActions[i];
         ba.progress += dt / ba.duration;
         if (ba.progress >= 1.0) {
-            horizonLockGroup.remove(ba.beam);
+            scene.remove(ba.beam);
             ba.beam.geometry.dispose();
             ba.beam.material.dispose();
             if (ba.glowSphere) {
-                horizonLockGroup.remove(ba.glowSphere);
+                scene.remove(ba.glowSphere);
                 ba.glowSphere.geometry.dispose();
                 ba.glowSphere.material.dispose();
             }
@@ -1842,12 +1832,6 @@ function setupScene() {
     scene.background = new THREE.Color(0x000000);
     // Ikeda aesthetic: no fog — crisp mathematical precision in a pure void
 
-    // Group for orbital elements (files, directories, beams, user) so we
-    // can counter-rotate them against camera tilt to keep planet rings
-    // horizontally aligned regardless of right-click orbit angle
-    horizonLockGroup = new THREE.Object3D();
-    scene.add(horizonLockGroup);
-
     const aspect = window.innerWidth / window.innerHeight;
     camera = new THREE.PerspectiveCamera(75, aspect, 5, 500000);
 
@@ -1877,7 +1861,7 @@ function setupScene() {
     });
 
     // Track user interaction to avoid overriding manual camera adjustments
-    ['pointerdown', 'pointermove', 'wheel', 'touchstart', 'touchmove'].forEach(evt => {
+    ['pointerdown', 'wheel', 'touchstart'].forEach(evt => {
         renderer.domElement.addEventListener(evt, () => {
             lastUserInteraction = performance.now();
         });
@@ -2082,7 +2066,7 @@ function predictCameraZoom() {
 function cleanupScene() {
     // Dispose InstancedMesh for file spheres
     if (fileInstancedMesh) {
-        horizonLockGroup.remove(fileInstancedMesh);
+        scene.remove(fileInstancedMesh);
         fileInstancedMesh.geometry.dispose();
         fileInstancedMesh.material.dispose();
         const pIndex = pickableObjects.indexOf(fileInstancedMesh);
@@ -2096,7 +2080,7 @@ function cleanupScene() {
     (function removeDirMeshes(node) {
         if (node.isDirectory) {
             if (node.mesh) {
-                horizonLockGroup.remove(node.mesh);
+                scene.remove(node.mesh);
                 if (node.mesh.geometry) node.mesh.geometry.dispose();
                 if (node.mesh.material) node.mesh.material.dispose();
                 node.mesh = null;
@@ -2110,7 +2094,7 @@ function cleanupScene() {
     // Remove user meshes (including outline child meshes)
     users.forEach(userNode => {
         if (userNode.mesh) {
-            horizonLockGroup.remove(userNode.mesh);
+            scene.remove(userNode.mesh);
             // Traverse and dispose all children (outline mesh, etc.)
             userNode.mesh.traverse(child => {
                 if (child.geometry) child.geometry.dispose();
@@ -2130,7 +2114,7 @@ function cleanupScene() {
     // Remove beam action meshes
     beamActions.forEach(ba => {
         if (ba.beam) {
-            horizonLockGroup.remove(ba.beam);
+            scene.remove(ba.beam);
             if (ba.beam.geometry) ba.beam.geometry.dispose();
             if (ba.beam.material) {
                 if (Array.isArray(ba.beam.material)) {
@@ -2142,7 +2126,7 @@ function cleanupScene() {
         }
     });
     roadLines.forEach(line => {
-        horizonLockGroup.remove(line);
+        scene.remove(line);
         if (line.geometry) line.geometry.dispose();
         if (line.material) {
             if (Array.isArray(line.material)) {
@@ -2460,7 +2444,7 @@ function animate(timestamp) {
         updateBeamActions(dt);
         updateUserAvatars(dt);
     }
-    if (cameraNeedsAutoFit && !debugTiltActive) {
+    if (cameraNeedsAutoFit) {
         // Skip auto-fit if user recently interacted with the camera
         if (performance.now() - lastUserInteraction < AUTO_FIT_COOLDOWN) {
             // Still set the flag so it fires again next frame after cooldown
@@ -2497,7 +2481,7 @@ function animate(timestamp) {
                     camera.position.z = centerZ;
                     camera.position.y = bounceY;
                     controls.target.set(centerX, 0, centerZ);
-                    // controls.update() handled by the shared call below
+                    controls.update();
                 }
             } else {
                 // Normal smooth lerp toward target
@@ -2513,7 +2497,7 @@ function animate(timestamp) {
                     camera.position.y = currentY + (targetCamY - currentY) * lerpFactor;
                 }
                 controls.target.set(centerX, 0, centerZ);
-                // controls.update() handled by the shared call below
+                controls.update();
             }
 
             // Clear flag only when simulation is paused/done and camera converged
@@ -2524,7 +2508,7 @@ function animate(timestamp) {
             }
         }
     }
-    if (controls && !debugTiltActive) controls.update();
+    if (controls) controls.update();
     updateTooltip();
 
     // Update scrubber position to reflect current simulation time
@@ -2547,29 +2531,6 @@ function animate(timestamp) {
     // orbits (OrbitControls) without mouse movement — raycast needs
     // current camera matrix, not stale one from last onMouseMove
     if (pickableObjects.length > 0) updateTooltip();
-
-    // Counter-rotate orbital elements against camera vertical tilt so
-    // planet rings stay horizontally aligned (face-on) regardless of
-    // right-click orbit angle. Uses the camera's right-vector as the
-    // rotation axis for correct behaviour at any azimuth.
-    if (horizonLockGroup && camera) {
-        _horizonLockCounter++;
-        const camDir = new THREE.Vector3();
-        camera.getWorldDirection(camDir);
-        const horizLen = Math.sqrt(camDir.x * camDir.x + camDir.z * camDir.z);
-        if (horizLen > 0.001) {
-            const tilt = Math.asin(Math.min(1, horizLen));
-            const right = new THREE.Vector3(camDir.z, 0, -camDir.x).normalize();
-            horizonLockGroup.setRotationFromAxisAngle(right, -tilt);
-            _lastHorizonLockTilt = tilt;
-            _lastHorizonLockAxis = [right.x, right.y, right.z];
-        } else {
-            horizonLockGroup.quaternion.identity();
-            _lastHorizonLockTilt = 0;
-            _lastHorizonLockAxis = [0, 0, 0];
-        }
-    }
-
     if (renderer && scene && camera) renderer.render(scene, camera);
 
     // Use setTimeout for reliability in headless browsers (rAF is throttled)
@@ -2584,32 +2545,9 @@ window.__phourceDebug = {
     get bounceState() { return { active: _bounceActive, targetY: _bounceTargetY, amplitude: _bounceAmplitude, startTime: _bounceStartTime, lastPredictY: _lastPredictY, cameraNeedsAutoFit, maxDirDepth: _maxDirDepthRemaining.length ? _maxDirDepthRemaining[Math.min(commitIndex, _maxDirDepthRemaining.length - 1)] : 0 }; },
     get sceneObjects() {
         if (!scene) return [];
-        const all = [];
-        // Include direct children and horizonLockGroup children (orbital elements)
-        scene.children.forEach(c => {
-            if (c.userData) all.push(c.userData.type + ':' + (c.userData.nodeData ? c.userData.nodeData.name : c.userData.userName || '?'));
-            if (c.children) c.children.forEach(child => {
-                if (child.userData) all.push(child.userData.type + ':' + (child.userData.nodeData ? child.userData.nodeData.name : child.userData.userName || '?'));
-            });
-        });
-        return all;
+        return scene.children.map(c => c.userData ? c.userData.type + ':' + (c.userData.nodeData ? c.userData.nodeData.name : c.userData.userName || '?') : c.type);
     },
     get rendererInfo() { return renderer ? { renderCalls: renderer.info.render.calls, triangles: renderer.info.render.triangles } : null; },
-    get cameraDir() {
-        if (!camera) return null;
-        const d = new THREE.Vector3();
-        camera.getWorldDirection(d);
-        return { x: d.x, y: d.y, z: d.z };
-    },
-    get horizonLock() {
-        if (!horizonLockGroup) return null;
-        const e = new THREE.Euler().setFromQuaternion(horizonLockGroup.quaternion, 'YXZ');
-        return { 
-            rotX: horizonLockGroup.rotation.x, rotY: horizonLockGroup.rotation.y, rotZ: horizonLockGroup.rotation.z, 
-            eulerX: e.x, eulerY: e.y, 
-            counter: _horizonLockCounter, tilt: _lastHorizonLockTilt, axis: _lastHorizonLockAxis 
-        };
-    },
     get overlapCount() {
         if (!root || !forceLayoutNodes || forceLayoutNodes.length < 2) return 0;
         let overlaps = 0;
@@ -2735,27 +2673,6 @@ window.__phourceDebug = {
     settle: function() {
         settleCompleteLayout();
         return true;
-    },
-    setTilt: function(azimuthDeg, tiltDeg) {
-        if (!camera || !controls) return null;
-        const az = THREE.MathUtils.degToRad(azimuthDeg || 0);
-        const tilt = THREE.MathUtils.degToRad(tiltDeg || 0);
-        const centerX = window.__phourceDebug.controlTarget[0];
-        const centerZ = window.__phourceDebug.controlTarget[2];
-        const camPos = camera.position;
-        const dx = camPos.x - centerX, dy = camPos.y, dz = camPos.z - centerZ;
-        const radius = Math.sqrt(dx * dx + dy * dy + dz * dz);
-        // Freeze controls so update() doesn't override our camera position
-        debugTiltActive = (tiltDeg !== 0 || azimuthDeg !== 0);
-        controls.enabled = !debugTiltActive;
-        camera.position.set(
-            centerX + radius * Math.sin(tilt) * Math.sin(az),
-            radius * Math.cos(tilt),
-            centerZ + radius * Math.sin(tilt) * Math.cos(az) * -1
-        );
-        camera.lookAt(centerX, 0, centerZ);
-        controls.target.set(centerX, 0, centerZ);
-        return { cameraDir: window.__phourceDebug.cameraDir, horizonLock: window.__phourceDebug.horizonLock };
     },
     beamDebug: function() {
         var result = { total: beamActions.length, beams: [] };
