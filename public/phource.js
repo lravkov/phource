@@ -2572,7 +2572,7 @@ function animate(timestamp) {
             cxx += dx * dx; cxz += dx * dz; czz += dz * dz;
         }
         _inPlaneAngle = 0.5 * Math.atan2(2 * cxz, cxx - czz);
-        _inPlaneRot.setFromAxisAngle(_inPlaneRotAxis, -_inPlaneAngle);
+        _inPlaneRot.setFromAxisAngle(_inPlaneRotAxis, _inPlaneAngle);
     }
     // Update tooltip every frame so it stays correct when camera
     // orbits (OrbitControls) without mouse movement — raycast needs
@@ -2606,9 +2606,13 @@ function animate(timestamp) {
             _camRightTemp.crossVectors( _worldUpTemp, _camDirTemp ).normalize();
             _lastHorizonLockAxis = [ _camRightTemp.x, _camRightTemp.y, _camRightTemp.z ];
         } else {
-            // Top-down view: orbital plane is already face-on.
-            // Just apply the in-plane rotation to align principal direction with horizontal.
-            horizonLockGroup.quaternion.copy( _inPlaneRot );
+            // Top-down view: orbital plane is already face-on, but we still
+            // need the full formula to account for camera heading (azimuth).
+            // Using just _inPlaneRot without camera.quaternion would rotate
+            // in world space, decoupling from the screen's horizontal direction.
+            horizonLockGroup.quaternion.copy( camera.quaternion );
+            horizonLockGroup.quaternion.multiply( _90degX );
+            horizonLockGroup.quaternion.multiply( _inPlaneRot );
             _lastHorizonLockTilt = 0;
             _lastHorizonLockAxis = [0, 0, 0];
         }
