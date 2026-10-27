@@ -65,23 +65,12 @@ let fileInstanceCount = 0;
 const fileInstanceNodes = []; // instanceId -> fileNode
 
 // Parent group for all orbital elements so they can be counter-rotated
-// against camera tilt/azimuth, keeping planet rings horizontally aligned
+// against camera tilt, keeping planet rings horizontally aligned
 let horizonLockGroup = null;
 let _horizonLockCounter = 0;
 let _lastHorizonLockTilt = 0;
 let _lastHorizonLockAxis = [0, 0, 0];
 let debugTiltActive = false;
-// Reusable temporaries for horizon-lock counter-rotation
-const _camDirTemp = new THREE.Vector3();
-const _camRightTemp = new THREE.Vector3();
-const _camUpTemp = new THREE.Vector3();
-const _worldUpTemp = new THREE.Vector3(0, 1, 0);
-const _basisMatrix = new THREE.Matrix4();
-const _quatTemp = new THREE.Quaternion();
-const _90degX = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2);
-let _inPlaneRot = new THREE.Quaternion();  // In-plane rotation to align planets' principal direction with horizontal
-let _inPlaneAngle = 0;                     // Principal angle from PCA (radians)
-const _inPlaneRotAxis = new THREE.Vector3(0, 1, 0);  // Rotate around group's local Y
 const FILE_INSTANCES_CAPACITY = 3000;
 
 let logEntries = [];
@@ -95,7 +84,7 @@ let maxCommitCount = 1;
 let cameraNeedsAutoFit = false;
 let lastUserInteraction = 0;
 // Auto-fit only when user hasn't interacted for 2 seconds
-const AUTO_FIT_COOLDOWN = 5000;
+const AUTO_FIT_COOLDOWN = 2000;
 let dtSum = 0;
 let frameCount = 0;
 let _timeSinceLastCommit = 0;
@@ -1888,7 +1877,7 @@ function setupScene() {
     });
 
     // Track user interaction to avoid overriding manual camera adjustments
-    ['pointerdown', 'pointermove', 'pointerup', 'wheel', 'touchstart', 'touchmove', 'touchend'].forEach(evt => {
+    ['pointerdown', 'pointermove', 'wheel', 'touchstart', 'touchmove'].forEach(evt => {
         renderer.domElement.addEventListener(evt, () => {
             lastUserInteraction = performance.now();
         });
@@ -2554,65 +2543,28 @@ function animate(timestamp) {
     }
 
     stepOrbitalSimulation(dt);
-    // Periodically recompute the in-plane rotation angle via PCA on file positions.
-    // This aligns the planets' principal spread direction with camRight (horizontal),
-    // so a 2D arrangement does not appear sloped/vertical after the counter-rotation.
-    if (_horizonLockCounter % 30 === 0 && forceLayoutNodes && forceLayoutNodes.length > 2) {
-        let cx = 0, cz = 0;
-        const n = forceLayoutNodes.length;
-        for (let i = 0; i < n; i++) {
-            const p = forceLayoutNodes[i].targetPos;
-            cx += p.x; cz += p.z;
-        }
-        cx /= n; cz /= n;
-        let cxx = 0, cxz = 0, czz = 0;
-        for (let i = 0; i < n; i++) {
-            const p = forceLayoutNodes[i].targetPos;
-            const dx = p.x - cx, dz = p.z - cz;
-            cxx += dx * dx; cxz += dx * dz; czz += dz * dz;
-        }
-        _inPlaneAngle = 0.5 * Math.atan2(2 * cxz, cxx - czz);
-        _inPlaneRot.setFromAxisAngle(_inPlaneRotAxis, _inPlaneAngle);
-    }
     // Update tooltip every frame so it stays correct when camera
     // orbits (OrbitControls) without mouse movement — raycast needs
     // current camera matrix, not stale one from last onMouseMove
     if (pickableObjects.length > 0) updateTooltip();
 
-    // Counter-rotate orbital elements against the camera so that the orbital
-    // plane stays face-on (normal → camera) AND the planets' horizontal
-    // arrangement always aligns with the camera's right vector, regardless
-    // of camera azimuth (yaw) or tilt (pitch).
-    // Uses a full basis matrix: group-local X → camRight, Y → -camDir,
-    // Z → -camUp — a complete rotation matching the camera's view frame.
+    // Counter-rotate orbital elements against camera vertical tilt so
+    // planet rings stay horizontally aligned (face-on) regardless of
+    // right-click orbit angle. Uses the camera's right-vector as the
+    // rotation axis for correct behaviour at any azimuth.
     if (horizonLockGroup && camera) {
         _horizonLockCounter++;
-        camera.getWorldDirection( _camDirTemp );
-        const horizLen = Math.sqrt( _camDirTemp.x * _camDirTemp.x + _camDirTemp.z * _camDirTemp.z );
+        const camDir = new THREE.Vector3();
+        camera.getWorldDirection(camDir);
+        const horizLen = Math.sqrt(camDir.x * camDir.x + camDir.z * camDir.z);
         if (horizLen > 0.001) {
-            const tilt = Math.asin( Math.min(1, horizLen) );
-            // Use the camera's own quaternion, then swap Y↔Z (rotate +90° around X)
-            // so the group's Y (plane normal) follows the camera's -Z (forward),
-            // and the group's X (planets' horizontal arrangement) follows the camera's X (right).
-            // After this: X → camRight (horizontal), Y → -camDir (toward camera), Z → -camUp (vertical).
-            horizonLockGroup.quaternion.copy( camera.quaternion );
-            horizonLockGroup.quaternion.multiply( _90degX );
-            // Apply in-plane rotation around the plane normal (local Y) to align
-            // the planets' principal direction with camRight (horizontal).
-            // Without this, planets arranged along Z appear vertical.
-            horizonLockGroup.quaternion.multiply( _inPlaneRot );
+            const tilt = Math.asin(Math.min(1, horizLen));
+            const right = new THREE.Vector3(camDir.z, 0, -camDir.x).normalize();
+            horizonLockGroup.setRotationFromAxisAngle(right, -tilt);
             _lastHorizonLockTilt = tilt;
-            // Compute camRight for debug: worldUp × camDir (not camDir × worldUp!)
-            _camRightTemp.crossVectors( _worldUpTemp, _camDirTemp ).normalize();
-            _lastHorizonLockAxis = [ _camRightTemp.x, _camRightTemp.y, _camRightTemp.z ];
+            _lastHorizonLockAxis = [right.x, right.y, right.z];
         } else {
-            // Top-down view: orbital plane is already face-on, but we still
-            // need the full formula to account for camera heading (azimuth).
-            // Using just _inPlaneRot without camera.quaternion would rotate
-            // in world space, decoupling from the screen's horizontal direction.
-            horizonLockGroup.quaternion.copy( camera.quaternion );
-            horizonLockGroup.quaternion.multiply( _90degX );
-            horizonLockGroup.quaternion.multiply( _inPlaneRot );
+            horizonLockGroup.quaternion.identity();
             _lastHorizonLockTilt = 0;
             _lastHorizonLockAxis = [0, 0, 0];
         }
@@ -2655,8 +2607,7 @@ window.__phourceDebug = {
         return { 
             rotX: horizonLockGroup.rotation.x, rotY: horizonLockGroup.rotation.y, rotZ: horizonLockGroup.rotation.z, 
             eulerX: e.x, eulerY: e.y, 
-            counter: _horizonLockCounter, tilt: _lastHorizonLockTilt, axis: _lastHorizonLockAxis,
-            inPlaneAngle: _inPlaneAngle ? THREE.MathUtils.radToDeg(_inPlaneAngle) : 0
+            counter: _horizonLockCounter, tilt: _lastHorizonLockTilt, axis: _lastHorizonLockAxis 
         };
     },
     get overlapCount() {
