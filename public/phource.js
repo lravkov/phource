@@ -2572,7 +2572,7 @@ function animate(timestamp) {
             cxx += dx * dx; cxz += dx * dz; czz += dz * dz;
         }
         _inPlaneAngle = 0.5 * Math.atan2(2 * cxz, cxx - czz);
-        _inPlaneRot.setFromAxisAngle(_inPlaneRotAxis, _inPlaneAngle);
+        _inPlaneRot.setFromAxisAngle(_inPlaneRotAxis, -_inPlaneAngle);
     }
     // Update tooltip every frame so it stays correct when camera
     // orbits (OrbitControls) without mouse movement — raycast needs
